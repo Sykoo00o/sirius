@@ -47,16 +47,25 @@ import os
 import re
 import sys
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable, Iterable, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import quote_plus
 
 import httpx
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, Header, HTTPException, Query, Request
+
+# Sibling module, imported by name: uvicorn and `python finance_agent.py` both put
+# this directory on sys.path, but a WSGI/container launcher might not. The import
+# is therefore guarded, and a failure to load the router degrades the chat to
+# keyword routing rather than taking the money endpoints down with it.
+try:
+    import llm_router as llm_routing
+except ImportError:  # pragma: no cover - depends on launcher, not on this file
+    llm_routing = None  # type: ignore[assignment]
 
 try:
     import psycopg
@@ -858,7 +867,7 @@ async def route_spend(
     if tx_id and approval_status == "pending":
         try:
             await notify_telegram_pending(store, tx_id, s)
-        except Exception as exc:  # noqa: BLE001 — card is an overlay on the queue
+        except Exception as exc:
             log.warning("approval card dispatch failed for %s: %s", tx_id[:8], exc)
     return GateResult(tx_id, tier, approval_status, fulfillment, execute, reason, envelope, False)
 
@@ -1068,6 +1077,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
                 await _SUPERVISOR_TASK
             _SUPERVISOR_TASK = None
         await STATE["issuer"].aclose()
+        if llm_routing is not None:
+            await llm_routing.aclose_router()
         STATE.clear()
 
 
@@ -1081,7 +1092,34 @@ def health(store: FinanceStore = Depends(get_store)) -> dict[str, Any]:
         "db": True,
         "dry_run": store.is_dry_run(),
         "issuer_configured": bool(STATE["issuer"].configured),
+        # Which models the chat path would actually use, no secrets: a wrong slug
+        # or a missing key is otherwise invisible until an owner's message fails.
+        "llm": _llm_health(),
     }
+
+
+@app.get("/llm/routing")
+def llm_routing_view() -> dict[str, Any]:
+    """Routing table in full (providers, tier chains, attempt counters)."""
+    if llm_routing is None:
+        return {"ok": False, "error": "llm_router module not importable"}
+    return {"ok": True, **llm_routing.get_router().describe()}
+
+
+def _llm_health() -> dict[str, Any]:
+    if llm_routing is None:
+        return {"configured": False, "error": "llm_router module not importable"}
+    try:
+        router = llm_routing.get_router()
+        return {
+            "configured": bool(router.providers),
+            "enabled": tg_llm_enabled(),
+            "providers": [p["name"] for p in router.describe()["providers"]],
+            "fast_model": router.candidates(llm_routing.TIER_FAST)[0].label,
+            "reasoning_model": router.candidates(llm_routing.TIER_REASONING)[0].label,
+        }
+    except Exception as exc:  # health must answer 200 with a reason, not 500
+        return {"configured": False, "error": f"{type(exc).__name__}: {str(exc)[:160]}"}
 
 
 @app.post("/webhooks/stripe")
@@ -1442,7 +1480,7 @@ def _supervisor_interval(store: FinanceStore) -> int:
     operational 30s in from_env) exists so tests can drive real loop cycles."""
     try:
         iv = int(store.resolved_settings().supervisor_interval_seconds)
-    except Exception:  # noqa: BLE001 — cadence is config, not money
+    except Exception:
         return 60
     return min(3600, max(1, iv))
 
@@ -1469,7 +1507,7 @@ async def run_supervisor_loop() -> None:
             await _supervisor_notify(store, counts)
         except asyncio.CancelledError:
             raise
-        except asyncio.TimeoutError:
+        except TimeoutError:
             log.warning("supervisor tick timed out after %ss", interval)
         except Exception as exc:  # psycopg, network, or our own bug — none fatal
             log.warning("supervisor tick failed (backoff %ss): %s", backoff, exc)
@@ -1497,7 +1535,7 @@ async def _supervisor_notify(store: FinanceStore, counts: dict[str, Any]) -> Non
         for tx_id in ids[:3]:
             try:
                 await notify_telegram_pending(store, tx_id)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 log.warning("anomaly card failed for %s: %s", tx_id[:8], exc)
     if counts.get("escalated"):
         esc = await asyncio.to_thread(_marker_ids_since, store,
@@ -1514,7 +1552,7 @@ async def _supervisor_notify(store: FinanceStore, counts: dict[str, Any]) -> Non
     digest = None
     try:
         digest = await asyncio.to_thread(_latest_error_digest, store)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     if digest:
         global _LAST_ERROR_ALERT
@@ -1540,7 +1578,7 @@ def _latest_error_digest(store: FinanceStore) -> str | None:
                 "where event = 'supervisor.tick' order by created_at desc limit 1")
             row = cur.fetchone()
             return str(row["d"])[:200] if row and row.get("d") else None
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
 
 
@@ -1550,10 +1588,10 @@ def _marker_ids_since(store: FinanceStore, event: str, window: str) -> list[str]
             cur.execute(
                 "select context->>'transaction_id' as id, max(created_at) as newest "
                 "from engine.agent_logs "
-                f"where event = %s and created_at > now() - interval %s "  # noqa: S608
+                "where event = %s and created_at > now() - interval %s "
                 "group by 1 order by newest desc limit 3", (event, window))
             return [str(r["id"]) for r in cur.fetchall() if r.get("id")]
-    except Exception:  # noqa: BLE001
+    except Exception:
         return []
 
 
@@ -1616,15 +1654,24 @@ def tg_url(token: str, method: str) -> str:
 async def tg_send_message(
     token: str, chat_id: int | str, text: str,
     reply_markup: dict[str, Any] | None = None,
+    parse_mode: str = "HTML",
 ) -> httpx.Response:
-    """One short-lived POST to sendMessage. parse_mode HTML, matching
-    supervisor.py's AlertSender (same escaping rules, same 4096 soft cap)."""
+    """One short-lived POST to sendMessage. parse_mode HTML by default, matching
+    supervisor.py's AlertSender (same escaping rules, same 4096 soft cap).
+
+    `parse_mode=""` is for text nobody escaped — the plain-English chat replies,
+    whose prose must survive verbatim (see `_sanitise_reply`). Sending unescaped
+    text as HTML is not a cosmetic miss: Telegram parses `<b>` as a tag and rejects
+    a stray `<` as a malformed entity, so a model that writes one angle bracket
+    either loses the character or kills the message entirely.
+    """
     payload: dict[str, Any] = {
         "chat_id": chat_id,
         "text": text[:4000],
-        "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
     if reply_markup is not None:
         payload["reply_markup"] = json.dumps(reply_markup)
     async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0)) as client:
@@ -1748,9 +1795,10 @@ def telegram_secret_ok(provided: str | None) -> bool:
 _SECRET_WARNED = False
 
 
-async def telegram_reply(store: FinanceStore, token: str, chat_id: int | str, text: str) -> None:
+async def telegram_reply(store: FinanceStore, token: str, chat_id: int | str, text: str,
+                         parse_mode: str = "HTML") -> None:
     try:
-        r = await tg_send_message(token, chat_id, text)
+        r = await tg_send_message(token, chat_id, text, parse_mode=parse_mode)
         if r.status_code >= 400:
             log.warning("telegram sendMessage rejected (%s): %s",
                         r.status_code, r.text[:200])
@@ -1952,10 +2000,17 @@ TG_HELP = (
 
 
 def handle_telegram_message(store: FinanceStore, text: str) -> str:
-    """Intent routing for text updates. Returns the reply HTML.
+    """Keyword routing for text updates. Returns the reply HTML, or "" when the
+    message matched no command and should reach the model.
 
-    Markdown specials in user text are escaped before insertion so a message
-    containing '*' or '_' cannot break the parse_mode=HTML reply either."""
+    Command matching is prefix-based and case-insensitive, as it was before, and it
+    stays the only synchronous path: `/approve <uuid>` must mean approve whether or
+    not a model provider is reachable. Unrecognised text returns "" and
+    `route_telegram_text` decides what happens next.
+
+    Anything the model or a user injects into a reply is escaped on the way out
+    (`_sanitise_reply`), so a stray '<' cannot break parse_mode=HTML.
+    """
     t = text.strip()
     low = t.lower()
     if low.startswith("/approve"):
@@ -1973,7 +2028,877 @@ def handle_telegram_message(store: FinanceStore, text: str) -> str:
         return build_status_report(store, get_settings())
     if low.startswith("/help") or t == "/start":
         return TG_HELP
-    return (f"🤖 I don't know <code>{_escape(t[:60])}</code> yet.\n{TG_HELP}")
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# Plain-English agent: LLM router + function calling
+# ---------------------------------------------------------------------------
+#
+# Keyword routing above is the deterministic path, and it stays first on purpose:
+# `/approve` must mean approve whether or not the model provider is reachable, and
+# a slash command answered by an LLM is a command that can silently change shape.
+# Anything the keyword table does not recognise falls through to here, which hands
+# the sentence to the router with a small set of tools and executes whatever the
+# model asks for.
+#
+# The tools are the SAME store writers the buttons and slash commands use
+# (`_apply_tg_decision`), so there is one code path that touches approval state and
+# the idempotent still-pending UPDATE guards all three.
+
+# One prompt template, one capability sentence.
+#
+# The prompt is generated rather than fixed because the tool set varies by caller,
+# and a model told "you can approve transactions" while holding only a read tool
+# does the predictable thing: it offers to approve, then explains that approval
+# "isn't wired in yet", which reads to the owner as a broken feature rather than as
+# a deliberate boundary. Describing the real tool set keeps the offer and the offer's
+# limit in one breath.
+_SYSTEM_TEMPLATE = """You are Sirius, the autonomous financial supervisor of this operation.
+
+You hold the ledger: every cent in and out, every pending approval, the daily and \
+monthly card caps, and whether live money is armed (dry_run). You answer the owner in \
+Telegram.
+
+What you can actually do, because these are the only tools you have: {capability}.
+Never offer an action that is not in that list, and never say you have done \
+something no tool returned for.
+
+How to work:
+- Asked what is pending, waiting, or owed: CALL get_pending_transactions. Never \
+invent a transaction id, an amount, or a count. The ledger is the only source.
+- "How much did we spend", "what is the balance", "are we armed": answer from the \
+ledger context injected below. If the figure is not in that context, call a tool; if \
+no tool carries it, say you do not have it rather than estimating.
+- When an action IS available to you and the owner asks for it, call the tool. Money \
+only moves because a tool ran.
+- If an instruction names no transaction, or names one you cannot match to the \
+pending list, ASK which one. Do not pick the "obvious" one: guessing spends money.
+- If the request needs something outside your tools (a refund issued, a vendor \
+contacted, a policy changed), say plainly that you cannot do that yet, and name the \
+command or button that can: /pending, /status, /approve plus the full id, /reject \
+plus the full id, or the two buttons on an approval card. Write a placeholder as \
+"the full id", never as angle brackets around a word: your reply is shown as plain \
+text, so anything you write in angle brackets arrives at the owner's eyes as markup \
+noise. Quote ids exactly as the tool returned them so the owner can copy one.
+
+Style: plain English, no markdown, no tables, no preamble, no sign-off. Under 900 \
+characters. Telegram italics only as _single underscores_. Currency exactly as the \
+ledger reports it. Report to the owner like a person who runs the books: the number \
+first, then what you did or what you need.
+"""
+
+CAPABILITY_READ_ONLY = (
+    "reading the ledger and the pending approval queue. You cannot approve or reject "
+    "anything yourself: the owner does that with the two buttons on a card, or "
+    "/approve and /reject. When asked to approve, tell them that plainly and offer "
+    "the exact command with the real id, ready to send"
+)
+CAPABILITY_FULL = (
+    "read the ledger, and approve or reject any pending transaction by id when the "
+    "owner asks"
+)
+
+
+def build_system_prompt(writer_tools_available: bool) -> str:
+    return _SYSTEM_TEMPLATE.format(
+        capability=CAPABILITY_FULL if writer_tools_available else CAPABILITY_READ_ONLY)
+
+# Number of prior owner messages replayed as conversation context. Bounded and
+# counted in the budget below, because every replayed character is paid for again
+# on each message.
+TG_LLM_HISTORY_MESSAGES = 6
+# Character budget over replayed history + injected ledger context.
+TG_LLM_CONTEXT_CHARS = 2600
+# Ceiling on the whole message list for one chat turn. The step count below bounds
+# model round-trips; this bounds what those round-trips cost, since every tool
+# result is replayed to the model on the next step.
+MAX_CHAT_CONTEXT_CHARS = 14_000
+# A tool result may never eat more than this slice of the turn's context budget.
+# Adapted down to what remains at the moment the result is appended (see
+# run_chat_turn), because a cap measured against the whole budget lets one wide
+# payload push the message list past the ceiling it was supposed to respect.
+TOOL_RESULT_BUDGET_FRACTION = 0.35
+# Never squeeze a result below this: a tool result trimmed to a stub answers
+# nothing, so it is better to overshoot slightly and stop the loop.
+TOOL_RESULT_MIN_CHARS = 700
+# Steps, not tool calls: one step can fan out to several parallel calls, so this
+# counts paid model requests, not actions taken.
+MAX_CHAT_TOOL_STEPS = 3
+# Reserve, in characters, below which the next request is forced to be an answer.
+# Deliberately generous: the trailing instruction plus the model's reply tokens are
+# not in `messages`, so a tight reserve is what makes the last call overshoot.
+CHAT_CONTEXT_RESERVE_CHARS = 3600
+
+TOOL_GET_PENDING = "get_pending_transactions"
+TOOL_APPROVE = "approve_transaction"
+TOOL_REJECT = "reject_transaction"
+
+TOOL_SPECS: tuple[dict[str, Any], ...] = (
+    {
+        "type": "function",
+        "function": {
+            "name": TOOL_GET_PENDING,
+            "description": "List spend intents currently awaiting human approval, "
+                           "newest first, with their transaction ids and amounts. "
+                           "Call this before approving or rejecting anything the "
+                           "owner refers to by description rather than by id.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum rows to return, 1-25. Default 10.",
+                        "minimum": 1, "maximum": 25,
+                    }
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": TOOL_APPROVE,
+            "description": "Approve a pending spend intent by transaction id, marking "
+                           "it authorized. Idempotent: an id that was already decided "
+                           "returns that it was already decided and changes nothing.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "transaction_id": {
+                        "type": "string",
+                        "description": "Full transaction UUID, exactly as returned by "
+                                       "get_pending_transactions.",
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "Optional short reason, recorded in the audit log.",
+                    },
+                },
+                "required": ["transaction_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": TOOL_REJECT,
+            "description": "Reject a pending spend intent by transaction id, cancelling "
+                           "it. Idempotent, same as approve_transaction.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "transaction_id": {
+                        "type": "string",
+                        "description": "Full transaction UUID.",
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "Optional short reason, recorded in the audit log.",
+                    },
+                },
+                "required": ["transaction_id"],
+            },
+        },
+    },
+)
+
+# Transaction ids the model produced but which are not in the pending set it was
+# shown: a hallucinated id must never reach the ledger as a decision.
+_LOOSE_ID_KEYS = ("transaction_id", "tx_id", "id", "transaction")
+
+
+def tg_llm_enabled() -> bool:
+    """Opt-in, default ON, and switched off by itself when it cannot possibly work.
+
+    A deployment with no LLM key keeps the keyword behaviour exactly; the flag exists
+    so a provider outage mid-conversation does not have to be a redeploy to silence
+    the chat path.
+
+    `llm_available()` asks the shared router rather than rebuilding providers from
+    env, for one reason beyond the avoided work: if the router has already been built,
+    this reports the same thing the chat branch is about to use. Two reads of the
+    environment could disagree when one had a key and the other had not.
+    """
+    return llm_available()
+
+
+def llm_available() -> bool:
+    """Whether the plain-English branch can run right now.
+
+    Env is the authority, read fresh, not the shared router's cached provider list.
+    The router builds its providers once, so after start it reports what the
+    environment held when it was built: an operator who removes a key and restarts
+    nothing would keep getting routed to a provider that can no longer authenticate.
+    The router then fails those calls one at a time, per message, rather than the
+    switch reflecting the operator's current intent.
+    """
+    if env("TG_LLM_ENABLED").lower() in {"0", "false", "no", "off"}:
+        return False
+    if llm_routing is None:
+        return False
+    try:
+        return bool(llm_routing.providers_from_env())
+    except Exception as exc:  # a broken LLM config disables chat, it never 500s
+        log.warning("llm router unusable, plain-english chat disabled: %s", exc)
+        return False
+
+
+def get_llm_completion(prompt: str, *, system: str = "", tier: str = "fast",
+                       messages: Sequence[dict[str, Any]] | None = None,
+                       tools: Sequence[dict[str, Any]] | None = None,
+                       tool_choice: Any = None, **kw: Any) -> Any:
+    """Synchronous wrapper over the async router, for sync callers and tests.
+
+    Raises RuntimeError inside a running loop rather than blocking it: the request
+    path must call the coroutine directly, and a blocked loop thread here would
+    stall every other webhook in the process.
+    """
+    if llm_routing is None:
+        raise RuntimeError("llm_router module unavailable")
+    coro = llm_routing.get_llm_completion(
+        prompt, system=system, tier=tier, messages=messages,
+        tools=tools, tool_choice=tool_choice, **kw)
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    coro.close()
+    raise RuntimeError("inside a running loop, await llm_router.get_llm_completion directly")
+
+
+def _truncate_utf8(text: str, limit: int) -> bytes:
+    """Cut on a character boundary. A model reply split mid-emoji is not worth a
+    UnicodeDecodeError on the reply path."""
+    return text.encode()[:limit]
+
+
+def _recent_owner_messages(store: FinanceStore, limit: int = TG_LLM_HISTORY_MESSAGES,
+                           exclude: str = "") -> list[dict[str, Any]]:
+    """Last few inbound Telegram messages, oldest first, from agent_logs.
+
+    The log is the only place inbound text lands, so history costs no new table.
+    Tool turns are not recoverable from it (the tool's reply was an outbound
+    message, indistinguishable from any other reply), so the model sees
+    user/assistant text pairs and nothing else: enough to resolve "approve that
+    one", not enough to make it think it already acted.
+    """
+    try:
+        with store._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                # event/message column names come from the store's own log() seam:
+                # event lands in `event`, and inbound text is prefixed there.
+                "select message from engine.agent_logs "
+                "where agent_handle = %s and event = 'TELEGRAM' "
+                "and message like 'inbound message:%%' "
+                "order by created_at desc limit %s",
+                (AGENT_HANDLE, limit + 1))
+            rows = cur.fetchall()
+    except Exception as exc:
+        log.debug("telegram history lookup unavailable: %s", exc)
+        return []
+    texts: list[str] = []
+    for r in reversed(rows):
+        text = str(r.get("message") or "").replace("inbound message:", "", 1).strip()
+        if text and text != exclude:
+            texts.append(text[:400])
+    # Alternate as user/assistant pairs; the newest inbound text is added by the
+    # caller, so replayed turns get an empty assistant placeholder.
+    messages: list[dict[str, Any]] = []
+    for text in texts:
+        messages.append({"role": "user", "content": text})
+        messages.append({"role": "assistant", "content": "ok"})
+    return messages[-limit:]
+
+
+def _ledger_snapshot(store: FinanceStore) -> str:
+    """Small authoritative context block, so read-only questions need no tool call.
+
+    Compact on purpose: this rides on every chat message, and the fast tier gets a
+    new copy each time rather than a growing conversation.
+    """
+    s = get_settings()
+    today = month = net = 0
+    try:
+        today, month = store.spend_totals(AGENT_HANDLE, s.default_currency)
+        with store._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                "select coalesce(sum(case when entry_type in "
+                "('revenue','refund','transfer_in','dispute_reversal','grant') "
+                "then amount_minor else -amount_minor end),0)::bigint as net "
+                "from engine.financial_ledger where currency = %s", (s.default_currency,))
+            net = int((cur.fetchone() or {}).get("net") or 0)
+            cur.execute(
+                "select count(*)::bigint as n, coalesce(sum(amount_minor),0)::bigint as total "
+                "from engine.transactions where direction = 'spend' "
+                "and approval_status = 'pending' "
+                "and (expires_at is null or expires_at > now())")
+            pend = cur.fetchone() or {}
+        pending_n = int(pend.get("n") or 0)
+        pending_total = int(pend.get("total") or 0)
+    except Exception as exc:
+        log.debug("ledger snapshot failed, continuing without it: %s", exc)
+        return "Ledger context: unavailable right now (database error). Say so if asked."
+    return (
+        "Ledger context (authoritative, computed just now):\n"
+        f"- net position: {fmt_minor(net, s.default_currency)}\n"
+        f"- spend today: {fmt_minor(today, s.default_currency)} · "
+        f"month: {fmt_minor(month, s.default_currency)} · "
+        f"monthly cap {fmt_minor(s.card_monthly_cap_minor, s.default_currency)}"
+        "\n"
+        f"- pending approvals: {pending_n} totalling "
+        f"{fmt_minor(pending_total, s.default_currency)}\n"
+        f"- auto-approve ceiling: {fmt_minor(s.tier1_max_minor, s.default_currency)} · "
+        f"human-review ceiling: {fmt_minor(s.tier2_max_minor, s.default_currency)}\n"
+        f"- dry_run (live money armed?): {str(store.is_dry_run()).lower()}\n"
+        f"- supervisor auto-approver: {'on' if s.supervisor_enabled else 'off'}, "
+        f"micro cap {fmt_minor(s.supervisor_micro_cap_minor, s.default_currency)}"
+    )
+
+
+def _pending_rows(store: FinanceStore, limit: int = 10) -> list[dict[str, Any]]:
+    limit = max(1, min(int(limit or 10), 25))
+    with store._connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select transaction_id::text as transaction_id, title, vendor, amount_minor, "
+            "currency, tier, created_at::text as created_at, expires_at::text as expires_at "
+            "from engine.transactions "
+            "where direction = 'spend' and approval_status = 'pending' "
+            "and (expires_at is null or expires_at > now()) "
+            "order by created_at desc limit %s", (limit,))
+        return [dict(r) for r in cur.fetchall()]
+
+
+def _tool_get_pending(store: FinanceStore, args: dict[str, Any]) -> dict[str, Any]:
+    """The only source of ids the model may quote back. Amounts are pre-formatted
+    so the model reproduces money instead of dividing integers."""
+    rows = _pending_rows(store, int(args.get("limit") or 10))
+    return {
+        "pending_count": len(rows),
+        "transactions": [
+            {
+                # id and amount first: truncation drops the tail of this list, and
+                # an id the model can still quote back is worth more than a vendor.
+                "transaction_id": r["transaction_id"],
+                "amount": fmt_minor(int(r.get("amount_minor") or 0),
+                                    str(r.get("currency") or "USD")),
+                "title": str(r.get("title") or "")[:80],
+                "vendor": str(r.get("vendor") or "")[:40],
+                "amount_minor": int(r.get("amount_minor") or 0),
+                "tier": r.get("tier"),
+                "requested_at": r.get("created_at"),
+            }
+            for r in rows
+        ],
+        "note": "Quote transaction_id values exactly as listed. If the owner means "
+                "something not listed, the intent is already decided or does not exist.",
+    }
+
+
+def _is_uuid(value: str) -> bool:
+    """Canonical 8-4-4-4-12 hex only.
+
+    The stricter check exists because `::text` casts, psycopg and the schema's own
+    lookups all require canonical form: a compact 32-hex id, or a canonical id
+    padded with whitespace, makes PostgreSQL raise `invalid input syntax for type
+    uuid`, which reads like a database outage and buries the actual answer.
+    """
+    return bool(re.fullmatch(
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+        value))
+
+
+def _decided_row_state(store: FinanceStore, tx_id: str) -> str | None:
+    """Approval status of a row by full UUID, or None when no such row exists.
+
+    Read outside the pending filter on purpose: it exists so a stale id reports
+    'already approved' rather than 'not found', which is the difference between the
+    model telling the owner their own decision back and telling them the
+    transaction never existed. Any read failure returns None, which is the honest
+    answer when state is unknown.
+    """
+    try:
+        with store._connect() as conn, conn.cursor() as cur:
+            cur.execute("select approval_status from engine.transactions "
+                        "where transaction_id = %s", (tx_id,))
+            row = cur.fetchone()
+    except Exception as exc:
+        log.debug("decided-state lookup failed for %s: %s", tx_id[:8], exc)
+        return None
+    return str(row["approval_status"]) if row else None
+
+
+def _resolve_tx_id(store: FinanceStore, raw: str) -> tuple[str | None, str]:
+    """Map whatever the model produced to exactly one pending transaction UUID.
+
+    A full UUID is checked against the pending set only, so a stale or invented id
+    cannot be applied to a row the model never saw. That filter is the real safety
+    property, and it runs before any write, so an ambiguous or shortened prefix that
+    happens to be unique is as safe to honour as a full id. This matters because a
+    cheap model given twenty pending rows and no guidance will paraphrase the id it
+    was shown, and refusing on formatting alone would turn a correct guess about
+    which row was meant into a dead end.
+
+    Prefix matching is hex-only, so it cannot widen a decimal-looking token into
+    something that matches two vendors' rows by luck of characters.
+
+    Second return value is the reason, and when an id is a real row that merely is
+    not pending any more, the reason names its actual status: models repeat the
+    tool's wording to the owner, so 'already approved' beats a shrug.
+    """
+    cand = (raw or "").strip().strip("<>`").strip()
+    if not cand:
+        return None, "no transaction id supplied"
+    pending = _pending_rows(store, 25)
+    by_id = {r["transaction_id"].lower(): r["transaction_id"] for r in pending}
+    if cand.lower() in by_id:
+        return by_id[cand.lower()], "exact"
+    # Hex-only, 4 characters minimum (the shortest id any card or command displays,
+    # so an owner reading "approve a3f2" is honoured). Dashes are stripped, so both
+    # canonical and compact spellings reach the same comparison.
+    flat = cand.lower().replace("-", "")
+    if len(flat) < 4 or not re.fullmatch(r"[0-9a-f]+", flat):
+        return None, f"'{cand[:40]}' is not a transaction id"
+    hits = {tx for tx_id, tx in by_id.items() if tx_id.replace("-", "").startswith(flat)}
+    if len(hits) == 1:
+        return hits.pop(), "unique prefix"
+    if len(hits) > 1:
+        return None, f"'{cand[:12]}' matches several pending transactions"
+    if len(hits) == 0 and _is_uuid(cand):
+        # Canonical form is what lets us query the row at all (see _is_uuid).
+        # A non-canonical id that matched nothing above is simply unknown.
+        state = _decided_row_state(store, cand)
+        if state and state != "pending":
+            return None, f"that transaction was already {state}, so nothing changed"
+        if state == "pending":
+            # Pending in the table but absent from the queue we just read: expired.
+            return None, "that transaction is pending but past its expiry window"
+    return None, "no pending transaction matches that id (already decided, or not found)"
+
+
+def _tidy_note(note: Any) -> str:
+    return str(note or "").strip()[:200]
+
+
+def _tool_decide(store: FinanceStore, args: dict[str, Any], action: str,
+                 tool_name: str) -> dict[str, Any]:
+    raw_id = next((str(args[k]) for k in _LOOSE_ID_KEYS if args.get(k)), "")
+    tx_id, why = _resolve_tx_id(store, raw_id)
+    if tx_id is None:
+        # Refusal, not failure: the model relays it and asks the owner to be specific.
+        store.log("warning", "llm.tool_refused",
+                  f"{tool_name} refused: {why}", extra={"raw_id": raw_id[:40]},
+                  is_audit=True)
+        return {"ok": False, "error": why,
+                "hint": "Call get_pending_transactions and use a listed id."}
+
+    outcome = _apply_tg_decision(store, tx_id, action)
+    row = _fetch_decision_row(store, tx_id)
+    note = _tidy_note(args.get("note"))
+    if outcome == "missing":
+        return {"ok": False, "error": "that transaction disappeared before the decision "
+                                      "was written; nothing changed"}
+    if outcome == "duplicate":
+        return {
+            "ok": True, "duplicate": True,
+            "transaction_id": tx_id,
+            "approval_status": row.get("approval_status"),
+            "amount": fmt_minor(int(row.get("amount_minor") or 0),
+                                str(row.get("currency") or "USD")),
+            "note": "Already decided earlier, so nothing changed.",
+        }
+    store.log("info", "llm.tool_executed",
+              f"{tool_name} applied to {tx_id[:8]}"
+              + (f": {note}" if note else ""),
+              transaction_id=tx_id, is_audit=True)
+    return {
+        "ok": True, "duplicate": False,
+        "transaction_id": tx_id,
+        "approval_status": row.get("approval_status") or
+                           ("approved" if action == TG_ACTION_APPROVE else "rejected"),
+        "title": str(row.get("title") or "")[:120],
+        "amount": fmt_minor(int(row.get("amount_minor") or 0),
+                            str(row.get("currency") or "USD")),
+        "decided_at": row.get("approved_at"),
+        "dry_run": store.is_dry_run(),
+    }
+
+
+def _tool_arguments_failed(tool_name: str, err: str) -> dict[str, Any]:
+    return {"ok": False, "error": f"the {tool_name} call arrived malformed: {err}",
+            "hint": "Try again with a complete transaction_id."}
+
+
+def _tool_unknown(name: str) -> dict[str, Any]:
+    return {"ok": False, "error": f"there is no tool named {name!r}"}
+
+
+TOOLS: dict[str, Callable[[FinanceStore, dict[str, Any]], dict[str, Any]]] = {
+    TOOL_GET_PENDING: _tool_get_pending,
+    TOOL_APPROVE: lambda s, a: _tool_decide(s, a, TG_ACTION_APPROVE, TOOL_APPROVE),
+    TOOL_REJECT: lambda s, a: _tool_decide(s, a, TG_ACTION_REJECT, TOOL_REJECT),
+}
+
+
+def run_tool(store: FinanceStore, name: str, arguments: dict[str, Any],
+             *, parse_error: str = "") -> dict[str, Any]:
+    """Single execution seam for model tool calls (unit-testable in isolation)."""
+    if parse_error:
+        return _tool_arguments_failed(name, parse_error)
+    handler = TOOLS.get(name)
+    if handler is None:
+        return _tool_unknown(name)
+    try:
+        return handler(store, arguments or {})
+    except Exception as exc:  # a DB write failing must read as a tool result, not a 500
+        log.exception("tool %s execution failed", name)
+        return {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:200]}"}
+
+
+def _longest_list_path(
+    value: Any, path: tuple[str, ...] = (),
+) -> tuple[tuple[str, ...], list] | None:
+    """Path to the biggest list anywhere in a nested payload.
+
+    The row list is what makes a tool result large wherever it sits, and dropping
+    whole rows off its end is the only truncation that keeps the JSON parseable.
+    """
+    best: tuple[tuple[str, ...], list] | None = None
+    if isinstance(value, list) and (best is None or len(value) > len(best[1])):
+        best = (path, value)
+    if isinstance(value, dict):
+        for k, v in value.items():
+            found = _longest_list_path(v, (*path, str(k)))
+            if found and (best is None or len(found[1]) > len(best[1])):
+                best = found
+    return best
+
+
+def _set_path(container: dict[str, Any], path: tuple[str, ...], value: Any) -> dict[str, Any]:
+    """Copy-on-write set at a nested path, so the caller's dict is not mutated."""
+    if not path:
+        return container
+    head, *rest = path
+    inner = container.get(head)
+    updated = dict(container)
+    updated[head] = _set_path(inner, rest, value) if (rest and isinstance(inner, dict)) else value
+    return updated
+
+
+def _bounded_tool_result(name: str, result: dict[str, Any], budget: int) -> str:
+    """Serialise a tool result under a character budget.
+
+    Truncation drops whole list entries from the tail rather than cutting the JSON
+    string, so the model always receives parseable text: a sliced tail reads as a
+    corrupt message and invites the model to invent the missing rows.
+
+    A trimmed result carries `truncated_rows` and a note. That is not decoration:
+    shown thirteen of forty pending items and told nothing, a model reports "the
+    three pending items" to the owner with full confidence.
+    """
+    text = json.dumps(result, ensure_ascii=False, default=str)
+    if len(text) <= budget:
+        return text
+    found = _longest_list_path(result)
+    if found:
+        path, items = found
+        slim = result
+        for cut in range(len(items) - 1, -1, -1):
+            # Shrink from the tail: the newest rows lead the list, so a cut loses the
+            # least useful entries. `slim` accumulates, so each trial is smaller than
+            # the last and the first one that fits is the largest one that fits.
+            slim = _set_path(slim, path, items[:cut])
+            candidate = json.dumps(
+                {**slim,
+                 "truncated_rows": len(items) - cut,
+                 "note": f"showing the first {cut} of {len(items)} rows, the rest "
+                         "were trimmed to fit; the count above is the true total"},
+                ensure_ascii=False, default=str)
+            if len(candidate) <= budget:
+                return candidate
+    # Nothing left to trim: either no list exists, or every field is individually
+    # larger than the budget (a giant error string, say). Re-emit a minimal result
+    # whose OWN fields are shrunk to fit, rather than slicing the serialised JSON,
+    # because slicing produces `{"error": "eee…` and a model reads that as a broken
+    # message and starts inventing what came after the cut.
+    note = "tool result too large to fit; nothing was inferred from it"
+    for text_cap in (max(0, budget - 120), 80, 20, 0):
+        candidate = json.dumps({"ok": bool(result.get("ok")),
+                                "error": str(result.get("error")
+                                             or "result too large to fit")[:text_cap],
+                                "note": note}, ensure_ascii=False)
+        if len(candidate) <= budget:
+            return candidate
+    return "{}"
+
+
+def _trim_history(messages: list[dict[str, Any]], budget: int) -> list[dict[str, Any]]:
+    """Drop oldest turns until the replay fits the budget."""
+    out = list(messages)
+    while out and sum(len(str(m.get("content") or "")) for m in out) > budget:
+        out = out[2:] if len(out) > 1 else []
+    return out
+
+
+def _sanitise_reply(text: str) -> str:
+    """Model text → text safe to send with parse_mode=HTML, WITHOUT escaping it.
+
+    Not escaping is a deliberate choice, and it is about copyability. The owner's
+    main use of this reply is to lift a command out of it and send it, and the
+    commands carry angle-bracket placeholders: escape the prose and "/approve <id>"
+    reaches Telegram as the literal string "/approve &lt;id&gt;", which Telegram then
+    shows as-is, so a copy-paste of the model's own suggestion fails. The chat path
+    therefore sends the model's text as ordinary text and parses the reply as no
+    entity at all.
+
+    What that gives up is styling, not safety: nothing model-authored is treated as
+    markup anywhere in the chat path, so a model emitting "<b>" or a stray "<" shows
+    it literally and cannot break the message or inject a tag. Escaping belongs to
+    the builders that DO emit markup (cards, status reports, the command router's
+    help text), and those still call `_escape` on every interpolated value.
+
+    Markdown the model writes out of habit (`**bold**`) is flattened to plain text
+    because Telegram renders it nowhere and it reads as noise.
+    """
+    cleaned = re.sub(r"\r\n?", "\n", (text or "").strip())
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    cleaned = cleaned.replace("**", "").replace("__", "_")
+    return _truncate_utf8(cleaned, 3500).decode("utf-8", "ignore")
+
+
+def _plain_quoted(text: str, limit: int = 60) -> str:
+    """Quote inbound owner text for a plain-mode reply, on one line.
+
+    The text is echoed into a reply about itself, so it needs delimiting, and it
+    arrives from a chat client that can put anything in it: newlines would push the
+    apology apart from the quote, and control characters would break the layout.
+    Deliberately not escaped — these replies are sent with parse_mode off.
+    """
+    return repr(str(text or "")[:limit])[1:-1].replace("\t", "\\t")
+
+
+def _degraded_reply(err: Exception) -> str:
+    kind = type(err).__name__
+    if llm_routing is not None and isinstance(err, llm_routing.LLMRequestRejected):
+        detail = "the model rejected the request (check the configured model names)"
+    elif llm_routing is not None and isinstance(err, llm_routing.LLMNotConfigured):
+        detail = "no model provider is configured (set NVIDIA_API_KEY or OPENROUTER_API_KEY)"
+    else:
+        detail = "every configured model is unreachable right now"
+    log.warning("llm chat path degraded: %s: %s", kind, str(err)[:200])
+    # Plain text, no markup: this is sent with parse_mode off like every other
+    # chat-path reply, so entities here would show as literals and commands would
+    # stop being copy-pasteable.
+    return (
+        "🤖 I could not think about that one — " + detail + ".\n"
+        "The books are untouched and every command still works:\n"
+        "/pending · /status · /approve <id> · /reject <id>\n"
+        "replied by the keyword router, not the model"
+    )
+
+
+async def run_chat_turn(store: FinanceStore, prompt: str, *,
+                        history: Sequence[dict[str, Any]] | None = None,
+                        context: str = "",
+                        router: Any = None,
+                        tools: Iterable[dict[str, Any]] | None = None,
+                        specs: Sequence[str] = (TOOL_GET_PENDING,),
+                        max_steps: int = 4) -> str:
+    """Drive one plain-English exchange, executing tool calls until the model answers.
+
+    `specs` bounds what the model may ask for. The conversational path gets the read
+    only: with approve/reject in hand and a garbled prefix, a cheap model guessing
+    the wrong one of two lookalike pending ids would spend money with nobody
+    reading it, and the buttons plus /approve exist for the decisive act. The
+    writer tools stay registered and reachable for a caller that opts them in.
+
+    The loop is bounded twice over, and the bounds are recomputed from the message
+    list before every request rather than tracked in a counter:
+
+    * `max_steps` bounds model round-trips, which stops a tool ping-pong.
+    * `MAX_CHAT_CONTEXT_CHARS` bounds what those round-trips cost, since each tool
+      result is replayed on the following step. A single tool result may take at
+      most `TOOL_RESULT_BUDGET_FRACTION` of what is left, which guarantees progress
+      toward the ceiling: without that per-call slice, one wide payload grows the
+      list past the ceiling it exists to enforce.
+
+    When the ceiling is reached, tools are withdrawn with an instruction to answer
+    now. Withdrawing matters as much as the byte count: if the model could still
+    call tools, that final request would be the one that busts the budget.
+
+    `router` is a seam for tests and for a caller holding its own router, and must
+    expose `get_completion` plus the router's exception classes (what `LLMRouter`
+    provides). Passing the module instead, whose entry point is the differently named
+    `get_llm_completion`, is answered with a stated failure rather than an
+    AttributeError reaching the owner as "I understood that and then failed".
+    """
+    if router is not None:
+        routing = router
+    elif llm_routing is not None:
+        routing = llm_routing.get_router()
+    else:
+        return _degraded_reply(RuntimeError("llm_router module unavailable"))
+    if not hasattr(routing, "get_completion"):
+        return _degraded_reply(RuntimeError(
+            f"router seam got {type(routing).__name__}, which has no get_completion; "
+            "pass an LLMRouter, not the module"))
+    # The loop distinguishes "the provider failed" (degrade, honestly) from "our code
+    # failed" (raise, loudly), and that split needs the router's exception types. A
+    # double that omits them falls back to the module's, which are the same classes.
+    router_error = getattr(routing, "LLMError", None)
+    if router_error is None and llm_routing is not None:
+        router_error = llm_routing.LLMError
+    llm_errors: tuple[type[BaseException], ...] = (router_error or RuntimeError,)
+    allowed = set(specs)
+    tool_specs = [t for t in (tools or TOOL_SPECS)
+                  if t.get("function", {}).get("name") in allowed]
+    snapshot = context or _ledger_snapshot(store)
+    # History shares one budget with the snapshot: context is the bigger, more
+    # useful half, so it is taken first and history gets what is left.
+    history_budget = max(200, TG_LLM_CONTEXT_CHARS - len(snapshot))
+    # Writers are advertised only when they are actually in `tool_specs`, so the
+    # model's description of itself matches the tools it was handed.
+    can_write = any(t.get("function", {}).get("name") in (TOOL_APPROVE, TOOL_REJECT)
+                    for t in tool_specs)
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": build_system_prompt(can_write)}]
+    messages.extend(_trim_history(list(history or []), history_budget))
+    messages.append({"role": "user", "content": f"{snapshot}\n\nOwner: {prompt[:1500]}"})
+
+    results: list[dict[str, Any]] = []
+    stopped_for_budget = False
+    for step in range(max(1, max_steps)):
+        kwargs: dict[str, Any] = {"tier": "fast", "max_tokens": 600, "temperature": 0.3}
+        if tool_specs:
+            kwargs["tools"] = tool_specs
+            kwargs["tool_choice"] = "auto"
+        # Measured, not accumulated: the assistant/tool_call scaffolding has a size
+        # too, and a counter that forgets it under-reads the very thing we cap.
+        used_chars = sum(len(str(m.get("content") or "")) for m in messages)
+        if MAX_CHAT_CONTEXT_CHARS - used_chars < CHAT_CONTEXT_RESERVE_CHARS:
+            stopped_for_budget = True
+            messages.append({"role": "user", "content":
+                             "Context is full. Answer now with what you have, in one "
+                             "short sentence, and do not call any more tools."})
+            kwargs.pop("tools", None)
+            kwargs.pop("tool_choice", None)
+        try:
+            completion = await routing.get_completion("", messages=messages, **kwargs)
+        except (*llm_errors, httpx.HTTPError) as exc:
+            if results:
+                return _summarise_executed(results)
+            return _degraded_reply(exc)
+
+        if not completion.tool_calls:
+            text = _sanitise_reply(completion.text or "")
+            return text or _no_action_reply()
+
+        messages.append({"role": "assistant", "content": completion.text or "",
+                         "tool_calls": [
+                             {"id": tc.id or f"call_{step}_{i}", "type": "function",
+                              "function": {"name": tc.name,
+                                           "arguments": tc.raw_arguments
+                                           or json.dumps(tc.arguments)}}
+                             for i, tc in enumerate(completion.tool_calls)]})
+        for i, tc in enumerate(completion.tool_calls):
+            result = run_tool(store, tc.name, tc.arguments, parse_error=tc.parse_error)
+            results.append({"name": tc.name, **result})
+            slice_left = int((MAX_CHAT_CONTEXT_CHARS - used_chars)
+                             * TOOL_RESULT_BUDGET_FRACTION)
+            budget = max(TOOL_RESULT_MIN_CHARS, slice_left - len(results) * 40)
+            payload = _bounded_tool_result(tc.name, result, budget)
+            messages.append({"role": "tool",
+                             "tool_call_id": tc.id or f"call_{step}_{i}",
+                             "name": tc.name, "content": payload})
+
+    # Spent the step budget (or the context ceiling) with no prose from the model.
+    # Say what actually happened, and never imply the conversation finished neatly.
+    if results:
+        return _summarise_executed(results) + (
+            "\n_context limit reached, so I stopped asking; nothing else changed._"
+            if stopped_for_budget else "")
+    return _no_action_reply()
+
+
+def _summarise_executed(results: list[dict[str, Any]]) -> str:
+    """Fallback reply for a turn the model never finished narrating.
+
+    Used when the provider died mid-turn and when the loop ran out of room, and in
+    both cases it must state only what this process knows for certain: a decision
+    that landed, or the precise reason nothing did. Note the `ok and not error`
+    test below. A read-only tool that simply returned rows is not a fact worth
+    quoting back, since its payload is data rather than a failure, and dumping the
+    first row of JSON as though it were an error is how a reply lies about money.
+    """
+    decided = [r for r in results if r.get("ok") and r.get("approval_status")]
+    if decided:
+        lines = [f"✅ {str(r.get('transaction_id', ''))[:8]} → "
+                 f"{r.get('approval_status')!s}"
+                 + (f" · {r['amount']}" if r.get("amount") else "")
+                 + (" (already decided)" if r.get("duplicate") else "")
+                 for r in decided]
+        return "Recorded:\n" + "\n".join(lines)
+    failures = [str(r.get("error"))[:120] for r in results
+                if not r.get("ok") and r.get("error")]
+    return ("🤖 I did not get a finished answer from that, and nothing else changed."
+            + (f" What failed: {'; '.join(failures[:3])}" if failures else
+               " No transaction was altered."))
+
+
+def _no_action_reply() -> str:
+    return ("🤖 I could not turn that into an action, and nothing was changed.\n"
+            "Try /pending to see ids, or /status for the books.")
+
+
+async def handle_telegram_plain_english(store: FinanceStore, text: str) -> str:
+    """The LLM branch: history + ledger context in, reply HTML out."""
+    history = await asyncio.to_thread(_recent_owner_messages, store,
+                                      TG_LLM_HISTORY_MESSAGES, text)
+    context = await asyncio.to_thread(_ledger_snapshot, store)
+    return await run_chat_turn(store, text[:1500], history=history, context=context)
+
+
+class ChatReply(NamedTuple):
+    """A routed reply plus the parse mode it must be sent with.
+
+    One type instead of a bare string because the two reply families in this
+    function are built under opposite rules: the command router interpolates into
+    HTML markup and escapes every value, while model prose passes through
+    unescaped so a suggested `/approve <id>` stays copy-pasteable. A single
+    `parse_mode` has to be chosen at the send, after the fact, and inferring it
+    from the text (does it contain a tag?) is how one family silently gets the
+    other's treatment. The mode travels with the reply that decided it.
+    """
+
+    text: str
+    parse_mode: str = "HTML"
+
+
+async def route_telegram_text(store: FinanceStore, text: str) -> ChatReply:
+    """The join between the two routers: commands, then the model, then a canned reply.
+
+    Lives in the async phase (a sync function cannot await), which is why
+    `handle_telegram_message` signals "unmatched" with an empty string instead of
+    answering with help text. When the LLM path is off or unconfigured, unmatched
+    text gets exactly the reply it got before this feature existed.
+    """
+    reply = await asyncio.to_thread(handle_telegram_message, store, text)
+    if reply:
+        return ChatReply(reply)
+    if not await asyncio.to_thread(llm_available):
+        return ChatReply(f"🤖 I don't know <code>{_escape(text[:60])}</code> yet.\n{TG_HELP}")
+    try:
+        # Plain parse mode for everything the model touched, including this module's
+        # own fallback strings below: they are built for the same send.
+        return ChatReply(await handle_telegram_plain_english(store, text), parse_mode="")
+    except Exception as exc:
+        log.exception("plain-english turn failed")
+        return ChatReply(
+            f"⚠️ I understood \"{_plain_quoted(text)}\" as free text and then failed: "
+            f"{type(exc).__name__}: {str(exc)[:200]}\n"
+            "Nothing was changed. /pending · /approve <id> · /reject <id>",
+            parse_mode="")
 
 
 def telegram_worker_error(exc: Exception) -> str:
@@ -2121,10 +3046,10 @@ def _fetch_gate_row_raw(store: FinanceStore, tx_id: str) -> dict[str, Any]:
 async def _telegram_phase2_text(store: FinanceStore, token: str,
                                 chat_id: int | str, text: str) -> None:
     try:
-        reply = await asyncio.to_thread(handle_telegram_message, store, text)
-    except Exception as exc:  # noqa: BLE001 — surfaced to the owner as a reply
-        reply = telegram_worker_error(exc)
-    await telegram_reply(store, token, chat_id, reply)
+        reply = await route_telegram_text(store, text)
+    except Exception as exc:
+        reply = ChatReply(telegram_worker_error(exc))
+    await telegram_reply(store, token, chat_id, reply.text, parse_mode=reply.parse_mode)
 
 
 # ---------------------------------------------------------------------------
