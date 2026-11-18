@@ -1,0 +1,65 @@
+[project]
+name = "ghost-x2-engine"
+version = "0.1.0"
+description = "Multi-agent grey-hat business engine: supervisor, finance gatekeeper, ledger"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.34",
+  "psycopg[binary,pool]>=3.2",
+  "pydantic>=2.9",
+  "httpx>=0.27",
+  "apscheduler>=3.10",
+  # SQLAlchemyJobStore, which workers/funnel_worker.py uses so an armed trigger
+  # sequence survives a restart instead of dying with the process. Pinned to the
+  # 2.x line: apscheduler 3.x also accepts 1.4, and the psycopg3 DSN scheme this
+  # worker derives from DATABASE_URL ("postgresql+psycopg://") only resolves on 2.x.
+  "sqlalchemy>=2.0",
+  "PyYAML>=6.0",
+  "typer>=0.12",
+  "rich>=13.7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.6"]
+
+[project.scripts]
+engine = "engine.cli:app"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["engine*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# Money and safety rails deserve the strict paths: bare except hides a failed
+# charge, and unsorted imports hide where a secret enters the process.
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RET", "S", "C4", "PT", "RUF"]
+ignore = [
+  "RET504",
+  "S104",
+  # `x: Db = Depends(get_db)` is the FastAPI idiom; the call in the default is
+  # the mechanism, not an accident. Checking it away would mean rewriting DI.
+  "B008",
+  # Every `except Exception` in this codebase is a deliberate "this failure must
+  # not take down the loop" guard that logs first. BLE001 would only teach
+  # people to write bare `except:` instead.
+  "BLE001",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S105"]
+# An empty non-abstract async hook is the intended shape for an optional
+# lifecycle method, and these modules state the reason for every broad except
+# inline. Enforcing BLE001/B027 here would mostly push people to bare `except:`.
+"workers/*" = ["B027", "BLE001"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

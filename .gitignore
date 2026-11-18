@@ -1,0 +1,37 @@
+# --- secrets and local state -------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+supabase/.temp/
+supabase/.branches/
+
+# --- python ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+build/
+dist/
+
+# --- runtime artefacts -------------------------------------------------------
+logs/
+*.log
+data/
+tmp/
+backend/_sqlcheck.py
+backend/_probe.py
+backend/*.db
+
+# --- containers / editors / OS ----------------------------------------------
+.docker/
+node_modules/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

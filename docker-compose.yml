@@ -1,0 +1,162 @@
+# Ghost X2: multi-agent grey-hat business engine.
+# Database is Supabase (managed), so there is no Postgres service here.
+#
+#   docker compose up -d --build                 # API, supervisor, bot, workers
+#   docker compose --profile webhook up -d       # + Caddy for public HTTPS webhooks
+#   docker compose up -d supervisor              # bring one service back only
+#   docker compose logs -f --tail=100 worker-arbitrage
+#
+# Memory budget, because the target host is an Oracle A1.FREE instance
+# (1 OCPU, 6 GB, and swap that will not save you):
+#   supervisor         256M   loop + scheduler + docker CLI
+#   finance-gatekeeper 192M   ledger reads, gate decisions
+#   telegram-bot       192M   long-poll + card rendering
+#   api                256M   FastAPI, single worker
+#   worker-funnel      256M
+#   worker-arbitrage   256M   (512M once Playwright is added in Module 4)
+#   worker-whitelabel  192M
+#   ----------------------------------------
+#   total            ~1.6 GB of 6 GB, leaving headroom for the OS and for the
+#   headroom a container needs when it spikes rather than when it idles.
+#
+# `mem_limit` is a hard kill, not a suggestion: an OOM kill on a worker is a
+# clean restart with a missing heartbeat, while a host OOM is the whole fleet
+# and a dead Docker daemon. The limits are set above observed steady-state and
+# below what would starve the host.
+name: ghost-x2
+
+x-engine-defaults: &engine-defaults
+  build: ./backend
+  image: ghost-x2/engine:0.1.0
+  env_file: .env
+  environment:
+    # Per-service identity: log lines and audit rows carry it, and `docker
+    # compose logs` output from seven services interleaves.
+    ENGINE_RUNTIME: container
+    ENGINE_LOG_LEVEL: ${ENGINE_LOG_LEVEL:-INFO}
+  restart: unless-stopped
+  # init:true forwards SIGTERM, which every service uses to flush its final
+  # heartbeat. Without it, a restart looks like a crash in the health history.
+  init: true
+  stop_grace_period: 30s
+  # The socket is what lets the supervisor pause a sibling container. Read-only:
+  # a compromised agent should not be able to mount new volumes.
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock:ro
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+services:
+  api:
+    <<: *engine-defaults
+    command: ["engine", "api"]
+    ports:
+      # Bound to loopback on purpose. The dashboard reaches this through Caddy;
+      # a public 3100 with no auth in front exposes the approval buttons.
+      - "${API_BIND_IP:-127.0.0.1}:${BACKEND_PORT:-3100}:3100"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3100/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+
+  supervisor:
+    <<: *engine-defaults
+    command: ["engine", "supervisor"]
+    # Exactly one scheduler. The API and the supervisor both could arm jobs; the
+    # API does not, so a restart of one does not duplicate the morning digest.
+    environment:
+      ENGINE_RUNTIME: container
+      ENABLE_SCHEDULER: "true"
+    # Shares the image but not the memory ceiling with the API: this process also
+    # runs APScheduler and shells out to the docker CLI.
+    deploy:
+      resources:
+        limits:
+          memory: 320M
+
+  finance-gatekeeper:
+    <<: *engine-defaults
+    command: ["engine", "jobs", "expire", "--once"]
+    # A one-shot reconciler, not a loop: expiry work is a few rows per hour, and
+    # a permanent container to do it would be 192 MB of RAM idling. The restart
+    # policy re-runs it on the interval below via the supervisor's own tick, so
+    # this service exists mainly as a manual/`run_once` target.
+    profiles: ["oneshot"]
+    deploy:
+      resources:
+        limits:
+          memory: 192M
+
+  telegram-bot:
+    <<: *engine-defaults
+    command: ["engine", "bot"]
+    # No docker socket needed, and giving it one would only widen the blast
+    # radius of a compromised bot.
+    volumes: []
+    deploy:
+      resources:
+        limits:
+          memory: 192M
+
+  worker-funnel:
+    <<: *engine-defaults
+    command: ["engine", "worker", "funnel"]
+    volumes: []
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  worker-arbitrage:
+    <<: *engine-defaults
+    command: ["engine", "worker", "arbitrage"]
+    volumes: []
+    # 256M now. Headless Chromium in Module 4 needs roughly 512M plus a larger
+    # /dev/shm; leaving the value at 256M at that point means OOM kills that look
+    # like scraper bugs.
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  worker-whitelabel:
+    <<: *engine-defaults
+    command: ["engine", "worker", "whitelabel"]
+    volumes: []
+    deploy:
+      resources:
+        limits:
+          memory: 192M
+
+  caddy:
+    image: caddy:2.8
+    profiles: ["webhook"]
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      # ENGINE_DOMAIN enables automatic HTTPS on 443; leave it empty to serve the
+      # operator surface on plain :80 behind the loopback-only host firewall.
+      ENGINE_DOMAIN: ${ENGINE_DOMAIN:-}
+      CADDY_ADMIN_EMAIL: ${CADDY_ADMIN_EMAIL:-}
+      # caddy hash-password --plaintext 'YOUR_PASSPHRASE'
+      CADDY_OWNER_HASH: ${CADDY_OWNER_HASH:-}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [api]
+    deploy:
+      resources:
+        limits:
+          memory: 96M
+
+volumes:
+  caddy_data:
+  caddy_config:

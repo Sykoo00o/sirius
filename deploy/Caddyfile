@@ -1,0 +1,50 @@
+# Public reverse proxy for the engine API. Enable with:
+#   docker compose --profile webhook up -d
+#
+# Only two things legitimately need to reach us from the internet:
+#   1. Stripe (and other vendors) posting webhooks
+#   2. The owner's browser, when they are away from the laptop
+# Everything else stays on loopback, which is why the backend binds 127.0.0.1.
+
+{
+	admin off
+	email {env.CADDY_ADMIN_EMAIL}
+}
+
+:80 {
+	# Health check for the host monitor and for `curl localhost/health`.
+	handle /health {
+		reverse_proxy api:3100
+	}
+
+	# Vendor webhooks. These are the only paths an unauthenticated outsider hits,
+	# and each one is HMAC-verified in the application before it is trusted.
+	handle /webhooks/* {
+		reverse_proxy api:3100
+	}
+
+	# The operator surface. Deliberately NOT public: with no auth layer in front,
+	# anyone who finds the URL could tap "Approve" on a $200 spend. Basic auth
+	# turns that into a leaked htpasswd file instead of an open door.
+	#
+	# Generate the hash with:  caddy hash-password --plaintext 'YOUR_PASSPHRASE'
+	# and put the result in deploy/.htpasswd (mounted read-only, git-ignored).
+	handle {
+		basic_auth {
+			owner {env.CADDY_OWNER_HASH}
+		}
+		reverse_proxy api:3100
+	}
+
+	encode gzip
+	log {
+		output stdout
+		format console
+	}
+}
+
+# When ENGINE_DOMAIN is set (e.g. engine.example.com), Caddy provisions and
+# renews TLS automatically and :80 redirects. Keep the same three handlers.
+{$ENGINE_DOMAIN:dummy.invalid} {
+	redir :80 permanent
+}
