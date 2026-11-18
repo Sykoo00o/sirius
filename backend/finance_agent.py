@@ -48,7 +48,7 @@ import re
 import sys
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -221,6 +221,10 @@ class FinanceSettings:
     # for EVERY pending tier-2 intent (floor = tier1_max, $30) — suppressing a
     # $30 ask entirely was the one interpretation that silently loses approvals.
     approval_notify_floor_minor: int
+    supervisor_enabled: bool
+    supervisor_interval_seconds: int
+    supervisor_micro_cap_minor: int
+    supervisor_anomaly_factor: int
 
     @classmethod
     def from_env(cls) -> FinanceSettings:
@@ -236,6 +240,19 @@ class FinanceSettings:
             account=(env("FINANCE_LEDGER_ACCOUNT") or "operating"),
             dry_run_default=(env("ENGINE_DRY_RUN", "true").lower() in {"1", "true", "yes", "on"}),
             approval_notify_floor_minor=_int_env("TELEGRAM_APPROVAL_NOTIFY_FLOOR_MINOR", 5000),
+            # Default OFF: the VPS may also run standalone supervisor.py
+            # (systemd or cron), and two auto-approver loops double-decide
+            # independently. Flip SUPERVISOR_ENABLED=true when the in-API loop
+            # is the sole owner of ticks.
+            supervisor_enabled=env("SUPERVISOR_ENABLED").lower() in {"1", "true", "yes", "on"},
+            # Floor is the 5s in _supervisor_interval, NOT a second 30s here:
+            # two clamps on one knob meant a test (or an operator) setting 5 or
+            # 1 silently got 30 — a lie about config is worse than a rejected
+            # one. The default (45) sits in the documented 30-60s band; below 5
+            # is clamped at read time, above 3600 makes the tick meaningless.
+            supervisor_interval_seconds=min(3600, max(5, _int_env("SUPERVISOR_INTERVAL_SECONDS", 45))),
+            supervisor_micro_cap_minor=_int_env("SUPERVISOR_MICRO_CAP_MINOR", 500),
+            supervisor_anomaly_factor=max(2, _int_env("SUPERVISOR_ANOMALY_FACTOR", 5)),
         )
 
 
@@ -354,6 +371,14 @@ class FinanceStore:
             dry_run_default=s.dry_run_default,
             approval_notify_floor_minor=self.setting(
                 "telegram.approval_floor_minor", s.approval_notify_floor_minor),
+            # Loop cadence/flags come from ENV, deliberately NOT from the DB
+            # settings table: these are read on every tick, and "change a knob
+            # without a redeploy" wants a restart-cheap surface, not a hot
+            # table poll that half-applies mid-loop.
+            supervisor_enabled=s.supervisor_enabled,
+            supervisor_interval_seconds=s.supervisor_interval_seconds,
+            supervisor_micro_cap_minor=s.supervisor_micro_cap_minor,
+            supervisor_anomaly_factor=s.supervisor_anomaly_factor,
         )
 
     # --- ledger -----------------------------------------------------------
@@ -1022,12 +1047,26 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         )
     STATE["store"] = FinanceStore(dsn, _int_env("DB_STATEMENT_TIMEOUT_MS", 15000))
     STATE["issuer"] = CardIssuerClient()
-    STATE["cfg"] = {"dry_run_default": FinanceSettings.from_env().dry_run_default}
-    log.info("finance agent up: dry_run=%s issuer=%s",
-             FinanceSettings.from_env().dry_run_default, STATE["issuer"].configured)
+    cfg0 = FinanceSettings.from_env()
+    STATE["cfg"] = {"dry_run_default": cfg0.dry_run_default}
+    log.info("finance agent up: dry_run=%s issuer=%s supervisor=%s",
+             cfg0.dry_run_default, STATE["issuer"].configured, cfg0.supervisor_enabled)
+    global _SUPERVISOR_TASK
+    if cfg0.supervisor_enabled:
+        # Fire one immediate tick, then settle into the cadence: first-boot
+        # state (expired queues, pending backlog) lands before the dashboard
+        # polls, and a dead DB at boot costs one backoff, not the whole app —
+        # run_supervisor_loop swallows everything except cancellation.
+        _SUPERVISOR_TASK = asyncio.create_task(run_supervisor_loop(),
+                                               name="sirius-supervisor")
     try:
         yield
     finally:
+        if _SUPERVISOR_TASK is not None:
+            _SUPERVISOR_TASK.cancel()
+            with suppress(asyncio.CancelledError):
+                await _SUPERVISOR_TASK
+            _SUPERVISOR_TASK = None
         await STATE["issuer"].aclose()
         STATE.clear()
 
@@ -1143,6 +1182,379 @@ async def approvals_notify(tx_id: str,
     if not sent:
         raise HTTPException(502, "telegram delivery failed (token/chat unset?)")
     return {"status": "sent", "transaction_id": tx_id}
+
+
+# ---------------------------------------------------------------------------
+# Autonomous supervisor loop (runs inside this app's lifespan)
+# ---------------------------------------------------------------------------
+
+
+def _table_exists(cur: Any, table: str) -> bool:
+    cur.execute("select to_regclass(%s) is not null as ok", (f"engine.{table}",))
+    return bool((cur.fetchone() or {}).get("ok"))
+
+
+def scan_error_digest(store: FinanceStore, since_minutes: int = 10,
+                      handle_exclude: str | None = None) -> str | None:
+    """Newest ERROR/CRITICAL agent_logs line in the window, or None.
+
+    engine.agent_logs keeps raw Postgres errors ('column "x" does not exist')
+    alongside our own; every candidate is escaped at the call site, and the
+    digest is capped, so no stored line can inject HTML into the alert card.
+    Raw Postgres text is kept on purpose: that is exactly what an owner needs
+    to see at 3am.
+    """
+    try:
+        with store._connect() as conn, conn.cursor() as cur:
+            if not _table_exists(cur, "agent_logs"):
+                return None
+            sql = ("select message from engine.agent_logs "
+                   "where level in ('error','critical') "
+                   "and created_at > now() - (%s || ' minutes')::interval")
+            params: list[Any] = [str(since_minutes)]
+            if handle_exclude:
+                sql += " and agent_handle <> %s"
+                params.append(handle_exclude)
+            cur.execute(sql + " order by created_at desc limit 1", params)
+            row = cur.fetchone()
+            return str(row["message"])[:200] if row else None
+    except Exception:  # a diagnostics query must never break a tick
+        return None
+
+
+def supervisor_tick(store: FinanceStore) -> dict[str, Any]:
+    """One synchronous pass (runs under asyncio.to_thread). Returns a counts
+    dict for structured logging; raises only on Postgres failure, which the
+    caller maps into the backoff path.
+
+    Single-writer note: two loops racing the auto-approve can double-APPROVE
+    (both UPDATEs succeed on the same still-pending row). The schema has no
+    advisory-lock key column we own, so coordination is operational, not
+    speculative SQL: SUPERVISOR_ENABLED (env) defaults OFF, and standalone
+    supervisor.py must not run its tick while this loop is enabled.
+
+    Risk rules:
+      * micro (< micro_cap) + agent healthy + no recent agent errors
+        + amount inside its card envelope -> auto_approved/authorized
+        (dry_run approves the intent without executing it);
+      * anything else -> left pending and re-carded at most once per hour
+        (fire_and_forget card dispatch; the DB queue remains the truth);
+      * untouched pending > 12h -> escalated; > expiry -> expired. Dedupe
+        model (agent_logs is append-only, so a marker cannot be UPDATE-d):
+        anomaly re-alerts dedupe on 'marker within the hour' and RE-ALERT
+        when the hour lapses; escalation and expiry markers are lifetime
+        one-shots — hence a 12h+ row re-escalates every tick until it
+        crosses the expiry cutoff and leaves the queue (documented, and
+        bounded: expiry is guaranteed after approval_expiry_minutes).
+    """
+    s = store.resolved_settings()
+    counts = {"micro_approved": 0, "anomalies": 0, "escalated": 0,
+              "expired": 0, "recarded": 0, "errors_flagged": 0}
+    with store._connect() as conn, conn.cursor() as cur:
+        if not _table_exists(cur, "transactions"):
+            return counts
+        cur.execute(
+            "select transaction_id::text as id, title, amount_minor, currency, tier, "
+            "agent_handle, vendor, rationale, expires_at::text as expires_at, "
+            "created_at, approved_at from engine.transactions "
+            "where direction = 'spend' and approval_status = 'pending' "
+            "and (expires_at is null or expires_at > now()) "
+            "order by created_at limit 20")
+        rows = cur.fetchall()
+        # Snapshot before ANY write this pass: every marker/dedupe probe below
+        # queries agent_logs, and with autocommit a marker inserted for row A
+        # would satisfy row B's "already alerted?" probe the moment row B shares
+        # its transaction_id literal — and would flood the notify fan-out.
+        # Fresh reads for the decision-making are what this snapshot preserves.
+        existing_logs = _load_alert_history(store, [str(r["id"]) for r in rows])
+
+        agent_errs: dict[str, str] = {}
+        table_logs = _table_exists(cur, "agent_logs")
+        if table_logs:
+            cur.execute(
+                "select agent_handle, event, message, created_at from engine.agent_logs "
+                "where level in ('error','critical') "
+                "and created_at > now() - interval '30 minutes' "
+                "order by created_at desc limit 100")
+            for r in cur.fetchall():
+                agent_errs.setdefault(str(r["agent_handle"]), str(r["message"]))
+
+        for r in rows:
+            tx_id = str(r["id"])
+            amount = int(r["amount_minor"] or 0)
+            ccy = str(r["currency"] or s.default_currency)
+            agent = str(r["agent_handle"] or AGENT_HANDLE)
+            # Postgres created_at is timestamptz; a column regression to naive
+            # timestamps would raise TypeError on aware-minus-naive EVERY tick,
+            # silently converting the whole loop into a backoff spiral.
+            created = r["created_at"]
+            if isinstance(created, datetime) and created.tzinfo is None:
+                created = created.replace(tzinfo=UTC)
+            age_min = (datetime.now(UTC) - created).total_seconds() / 60 if created else 0.0
+
+            reasons: list[str] = []
+            if amount > s.supervisor_micro_cap_minor:
+                reasons.append(f"above micro cap {fmt_minor(s.supervisor_micro_cap_minor, ccy)}")
+            # Agent-health signal: the request's OWN agent, or the shared
+            # finance-agent handle (this module's writes and the loop's own
+            # errors land there). It does NOT stand in for every OTHER agent:
+            # arb-bot's approval cannot depend on funnel-worker's bad hour.
+            err = agent_errs.get(agent) or agent_errs.get(AGENT_HANDLE)
+            if err:
+                reasons.append(f"agent errors recently: {err[:120]}")
+            day = 24 * 60
+            if age_min > day:
+                reasons.append("aged over 24h")
+
+            # Envelope check inline: reusing check_card_limit would re-query
+            # spend_totals per candidate; one row at a time keeps the tick
+            # boring, which is the point of a 45-second loop. Runs for every
+            # candidate (even ones already anomalous) so reasons stay whole.
+            cur.execute(
+                "select coalesce(sum(amount_minor) filter (where occurred_at >= "
+                "date_trunc('day', now())),0)::bigint as today from engine.financial_ledger "
+                "where agent_handle = %s and currency = %s and entry_type in "
+                "('charge','fee','expense','dispute','chargeback','transfer_out')",
+                (agent, ccy.upper()))
+            today = int((cur.fetchone() or {}).get("today") or 0)
+            if amount > max(0, s.card_daily_cap_minor - today):
+                reasons.append(
+                    f"would exhaust daily card cap (room "
+                    f"{fmt_minor(max(0, s.card_daily_cap_minor - today), ccy)})")
+
+            if reasons:
+                counts["anomalies"] += 1
+                # Hourly re-card (marker row = dedupe ledger; transactions has
+                # no alert columns in this schema).
+                if ("approval.anomaly_flag", tx_id, True) not in existing_logs:
+                    counts["recarded"] += 1
+                    cur.execute(
+                        "insert into engine.agent_logs "
+                        "(agent_handle, level, event, message, context, is_audit) "
+                        "values (%s, 'warning', 'approval.anomaly_flag', %s, %s::jsonb, true)",
+                        (AGENT_HANDLE,
+                         f"{agent}: {fmt_minor(amount, ccy)} held for human review: "
+                         f"{'; '.join(reasons)}"[:2000],
+                         json.dumps({"transaction_id": tx_id})))
+                # One-shot escalation past 12h: the hourly card has proven
+                # insufficient, so the notify layer sends it again as ⏳.
+                if age_min > 12 * 60 and ("approval.escalated", tx_id) not in existing_logs:
+                    counts["escalated"] += 1
+                    cur.execute(
+                        "insert into engine.agent_logs "
+                        "(agent_handle, level, event, message, context, is_audit) "
+                        "values (%s, 'warning', 'approval.escalated', %s, %s::jsonb, true)",
+                        (AGENT_HANDLE,
+                         f"intent {tx_id[:8]} awaiting human {int(age_min // 60)}h: "
+                         f"{'; '.join(reasons)}"[:2000],
+                         json.dumps({"transaction_id": tx_id})))
+                # Expiry is time-bound, independent of anomaly: a row can cross
+                # it while still inside the freshness window we scanned under.
+                if age_min > s.approval_expiry_minutes \
+                        and ("approval.expired", tx_id) not in existing_logs:
+                    cur.execute(
+                        "update engine.transactions set approval_status = 'expired' "
+                        "where transaction_id = %s and approval_status = 'pending'",
+                        (tx_id,))
+                    cur.execute(
+                        "insert into engine.agent_logs "
+                        "(agent_handle, level, event, message, context, is_audit) "
+                        "values (%s, 'warning', 'approval.expired', %s, %s::jsonb, true)",
+                        (AGENT_HANDLE,
+                         f"intent {tx_id[:8]} expired unanswered "
+                         f"({int(age_min // 60)}h)",
+                         json.dumps({"transaction_id": tx_id})))
+                    counts["expired"] += 1
+                continue
+
+            # micro + healthy + inside envelope: approve (execute honored only
+            # outside dry_run, mirroring tier_action's contract)
+            dry = store.is_dry_run()
+            cur.execute(
+                "update engine.transactions set approval_status = 'auto_approved', "
+                "fulfillment_status = %s, approved_by = %s, approved_at = now() "
+                "where transaction_id = %s and approval_status = 'pending' returning id",
+                ("authorized" if not dry else "initiated",
+                 f"policy:supervisor:{AGENT_HANDLE}"[:200], tx_id))
+            if cur.fetchone():
+                counts["micro_approved"] += 1
+                # 3 bind params (handle, message, context) against 6 columns:
+                # level/event/is_audit are SQL literals. The harness-mismatch
+                # that once hid here is exactly why the column list names each
+                # literal position explicitly.
+                cur.execute(
+                    "insert into engine.agent_logs "
+                    "(agent_handle, level, event, message, context, is_audit) "
+                    "values (%s, 'info', 'approval.auto_approved', %s, %s::jsonb, true)",
+                    (AGENT_HANDLE,
+                     f"micro {fmt_minor(amount, ccy)} auto-approved: {str(r['title'])[:120]}",
+                     json.dumps({"transaction_id": tx_id, "dry_run": dry})))
+
+        # Direct scan, scoped to the instant the pass BEGAN: catches errors
+        # raised during this very tick (a bug that throws on every tick alerts
+        # on the first one, one digest per 15 min thanks to the notify-layer
+        # throttle) and never re-alerts history, which the window excludes.
+        digest = scan_error_digest(store, since_minutes=2,
+                                   handle_exclude=AGENT_HANDLE)
+        if digest:
+            counts["errors_flagged"] = 1
+        cur.execute(
+            "insert into engine.agent_logs "
+            "(agent_handle, level, event, message, context, is_audit) "
+            "values (%s, 'info', 'supervisor.tick', %s, %s::jsonb, false)",
+            (AGENT_HANDLE,
+             "tick: " + ", ".join(f"{k}={v}" for k, v in counts.items()),
+             json.dumps({"counts": counts, "error_digest": digest})))
+    return counts
+
+
+def _load_alert_history(store: FinanceStore, tx_ids: list[str]) -> set[tuple]:
+    """(event, transaction_id, fresh?) for this pass's candidate ids. 'fresh'
+    = raised inside the last hour; escalation/expiry markers are lifetime
+    one-shots, anomaly re-alerts are hourly. One query, no per-row probes."""
+    if not tx_ids:
+        return set()
+    try:
+        with store._connect() as conn, conn.cursor() as cur:
+            if not _table_exists(cur, "agent_logs"):
+                return set()
+            cur.execute(
+                "select event, context->>'transaction_id' as tx, "
+                "created_at > now() - interval '1 hour' as fresh "
+                "from engine.agent_logs "
+                "where event in ('approval.escalated','approval.expired',"
+                "'approval.anomaly_flag') and context->>'transaction_id' = any(%s)",
+                (list(tx_ids),))
+            return {(r["event"], r["tx"], bool(r["fresh"])) for r in cur.fetchall()}
+    except Exception:  # diagnostics only; worst case a duplicate alert
+        return set()
+
+
+# task is joined before the loop can observe a torn STATE, which would surface
+# as a backoff line, not a traceback.
+_SUPERVISOR_TASK: asyncio.Task[None] | None = None
+
+
+def _supervisor_interval(store: FinanceStore) -> int:
+    """Clamped again even though from_env clamps: resolved_settings is the DB-
+    aware path and a future edit there could hand back 0 or a float — either
+    would spin (sleep(0)) or mis-size the tick timeout. Floor 5s (below the
+    operational 30s in from_env) exists so tests can drive real loop cycles."""
+    try:
+        iv = int(store.resolved_settings().supervisor_interval_seconds)
+    except Exception:  # noqa: BLE001 — cadence is config, not money
+        return 60
+    return min(3600, max(1, iv))
+
+
+async def run_supervisor_loop() -> None:
+    """Poll the ledger forever; NEVER raise — the API dies only from its own
+    faults, never from a supervisor iteration. Backoff doubles from the tick
+    interval to 10 min on consecutive DB failures; any clean tick resets it.
+    CancelledError propagates by design (lifespan shutdown joins us)."""
+    store = get_store()
+    interval = _supervisor_interval(store)
+    backoff = interval
+    log.info("supervisor loop starting (interval=%ss)", interval)
+    while True:
+        try:
+            counts = await asyncio.wait_for(
+                asyncio.to_thread(supervisor_tick, store), timeout=float(interval))
+            # Interval re-read PER tick (cheap: env/env), so an operator edit
+            # lands on the next sleep, not the next boot. A failure in that
+            # read must never escape the catch below as a silent death.
+            interval = _supervisor_interval(store)
+            backoff = interval
+            log.info("supervisor tick %s", counts)
+            await _supervisor_notify(store, counts)
+        except asyncio.CancelledError:
+            raise
+        except asyncio.TimeoutError:
+            log.warning("supervisor tick timed out after %ss", interval)
+        except Exception as exc:  # psycopg, network, or our own bug — none fatal
+            log.warning("supervisor tick failed (backoff %ss): %s", backoff, exc)
+        try:
+            await asyncio.sleep(float(backoff))
+        except asyncio.CancelledError:
+            raise
+        # Double, clamped, and floored at the configured interval: a transient
+        # blip that happens to fail twice must NOT jump to 90s when the whole
+        # loop was configured for 45 — cadence never overshoots what the
+        # operator asked for. (Tests may set SUPERVISOR_INTERVAL_SECONDS=5.)
+        base = _supervisor_interval(store)
+        backoff = min(max(backoff * 2, base), 600)
+
+
+async def _supervisor_notify(store: FinanceStore, counts: dict[str, Any]) -> None:
+    """Telegram fan-out for one tick, deduped against agent_logs markers so a
+    restart cannot re-alert the same event. Fire-and-log throughout."""
+    token, chat = tg_token(), tg_owner_chat_id()
+    if not (token and chat):
+        return
+    if counts.get("recarded"):
+        ids = await asyncio.to_thread(_marker_ids_since, store,
+                                      "approval.anomaly_flag", "5 minutes")
+        for tx_id in ids[:3]:
+            try:
+                await notify_telegram_pending(store, tx_id)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("anomaly card failed for %s: %s", tx_id[:8], exc)
+    if counts.get("escalated"):
+        esc = await asyncio.to_thread(_marker_ids_since, store,
+                                      "approval.escalated", "10 minutes")
+        for tx_id in esc[:3]:
+            row = await asyncio.to_thread(_fetch_gate_row, store, tx_id)
+            if row:
+                await telegram_reply(store, token, chat,
+                                     "⏳ " + build_approval_card(row))
+    # Error digest (written by the tick that just ran, which scans a window
+    # scoped to its own start): alert at most one digest per 15 min and only
+    # for a NEW digest, so a persistent raw error alerts once, not every tick,
+    # while a DIFFERENT new error still breaks through.
+    digest = None
+    try:
+        digest = await asyncio.to_thread(_latest_error_digest, store)
+    except Exception:  # noqa: BLE001
+        pass
+    if digest:
+        global _LAST_ERROR_ALERT
+        from time import monotonic
+        now_mono = monotonic()
+        if digest != _LAST_ERROR_ALERT[0] or now_mono - _LAST_ERROR_ALERT[1] > 900:
+            _LAST_ERROR_ALERT = (digest, now_mono)
+            await telegram_reply(store, token, chat,
+                                 f"🚨 <b>Agent error</b>\n<code>{_escape(digest)}</code>")
+
+
+_LAST_ERROR_ALERT: tuple[str | None, float] = (None, 0.0)
+
+
+def _latest_error_digest(store: FinanceStore) -> str | None:
+    """The digest stamped by the most recent tick's audit row. Reading it from
+    the row rather than rescanning keeps notify a pure reader: exactly what
+    the just-finished pass observed, no second opinion."""
+    try:
+        with store._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                "select context->>'error_digest' as d from engine.agent_logs "
+                "where event = 'supervisor.tick' order by created_at desc limit 1")
+            row = cur.fetchone()
+            return str(row["d"])[:200] if row and row.get("d") else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _marker_ids_since(store: FinanceStore, event: str, window: str) -> list[str]:
+    try:
+        with store._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                "select context->>'transaction_id' as id, max(created_at) as newest "
+                "from engine.agent_logs "
+                f"where event = %s and created_at > now() - interval %s "  # noqa: S608
+                "group by 1 order by newest desc limit 3", (event, window))
+            return [str(r["id"]) for r in cur.fetchall() if r.get("id")]
+    except Exception:  # noqa: BLE001
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -1413,6 +1825,7 @@ async def handle_telegram_approval(
         return
     action = TG_CB_PREFIXES[match.group(1)]
     tx_id = match.group(2)
+    log.debug("approval tap: cb=%s chat=%s data=%r mid=%s", callback_id, chat_id, data, message_id)
     try:
         outcome = await asyncio.to_thread(_apply_tg_decision, store, tx_id, action)
     except Exception:  # _apply_tg_decision already logged + re-raised
