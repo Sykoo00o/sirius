@@ -216,6 +216,11 @@ class FinanceSettings:
     default_currency: str
     account: str
     dry_run_default: bool
+    # Amount above which an approval card carries a ⚠️ marker: the
+    # "high-value" line from the spec ($50 default). The card itself is sent
+    # for EVERY pending tier-2 intent (floor = tier1_max, $30) — suppressing a
+    # $30 ask entirely was the one interpretation that silently loses approvals.
+    approval_notify_floor_minor: int
 
     @classmethod
     def from_env(cls) -> FinanceSettings:
@@ -230,6 +235,7 @@ class FinanceSettings:
             default_currency=(env("DEFAULT_CURRENCY") or "USD").upper(),
             account=(env("FINANCE_LEDGER_ACCOUNT") or "operating"),
             dry_run_default=(env("ENGINE_DRY_RUN", "true").lower() in {"1", "true", "yes", "on"}),
+            approval_notify_floor_minor=_int_env("TELEGRAM_APPROVAL_NOTIFY_FLOOR_MINOR", 5000),
         )
 
 
@@ -346,6 +352,8 @@ class FinanceStore:
             default_currency=s.default_currency,
             account=s.account,
             dry_run_default=s.dry_run_default,
+            approval_notify_floor_minor=self.setting(
+                "telegram.approval_floor_minor", s.approval_notify_floor_minor),
         )
 
     # --- ledger -----------------------------------------------------------
@@ -816,6 +824,14 @@ async def route_spend(
         f"({reason})",
         transaction_id=tx_id, is_audit=True,
     )
+    # Pending tier-2 spend becomes an interactive Telegram card (inline
+    # Approve/Deny). Best-effort by design: the queue row above is the durable
+    # record, so a delivery failure logs and returns — it never 5xx's the gate.
+    if tx_id and approval_status == "pending":
+        try:
+            await notify_telegram_pending(store, tx_id, s)
+        except Exception as exc:  # noqa: BLE001 — card is an overlay on the queue
+            log.warning("approval card dispatch failed for %s: %s", tx_id[:8], exc)
     return GateResult(tx_id, tier, approval_status, fulfillment, execute, reason, envelope, False)
 
 
@@ -1105,6 +1121,27 @@ async def spend_envelope(
     return {"allowed": allowed, "reason": reason, **envelope}
 
 
+@app.post("/approvals/{tx_id}/notify")
+async def approvals_notify(tx_id: str,
+                           store: FinanceStore = Depends(get_store)) -> dict[str, Any]:
+    """(Re)send the interactive approval card for a queued intent.
+
+    Covers cards lost to a Telegram outage, and gives the Command Deck a button
+    per pending row. 404 covers 'no such row' and 'row is not pending' — a card
+    for a decided intent would offer dead buttons."""
+    if not _TG_UUID_RE.fullmatch(tx_id):
+        raise HTTPException(422, "tx_id must be a full uuid")
+    row = await asyncio.to_thread(_fetch_gate_row, store, tx_id)
+    if not row:
+        raise HTTPException(404, "transaction not found")
+    if row.get("approval_status") != "pending":
+        raise HTTPException(404, f"intent is {row.get('approval_status')}, not pending")
+    sent = await notify_telegram_pending(store, tx_id)
+    if not sent:
+        raise HTTPException(502, "telegram delivery failed (token/chat unset?)")
+    return {"status": "sent", "transaction_id": tx_id}
+
+
 # ---------------------------------------------------------------------------
 # Telegram conversational agent (Option A webhook: POST /webhooks/telegram)
 # ---------------------------------------------------------------------------
@@ -1113,12 +1150,21 @@ TG_API_BASE = "https://api.telegram.org"
 # The blueprint's draft had this URL mangled into a Markdown link
 # ("https://api.telegram.org/bot](...)"); the base + token concat below is the fix.
 
-# Same callback vocabulary as backend/supervisor.py's approval_keyboard_json
-# ("appr:<uuid>" / "rej:<uuid>"). The keys must match or taps on a supervisor-
-# posted card would 400 here. If you change one, change the other.
+# Two callback vocabularies are ACCEPTED, one is emitted:
+#   * "approve_<uuid>" / "deny_<uuid>"  — the interactive-card format introduced
+#     with the inline-approval feature (spec), what THIS module now sends;
+#   * "appr:<uuid>" / "rej:<uuid>"      — backend/supervisor.py's
+#     approval_keyboard_json, which is what already-live Telegram cards carry.
+# Parsing must accept both (a tap on an old card must not break mid-deploy);
+# emission stays single-format so the two senders don't drift further apart.
 TG_ACTION_APPROVE = "appr"
 TG_ACTION_REJECT = "rej"
-_CALLBACK_RE = re.compile(rf"^(?:{TG_ACTION_APPROVE}|{TG_ACTION_REJECT}):([0-9a-fA-F-]{{36}})$")
+TG_CB_PREFIXES = {
+    "approve": TG_ACTION_APPROVE, "appr": TG_ACTION_APPROVE,
+    "deny": TG_ACTION_REJECT, "rej": TG_ACTION_REJECT, "reject": TG_ACTION_REJECT,
+}
+_CB_ALT = "|".join(sorted(TG_CB_PREFIXES, key=len, reverse=True))
+_CALLBACK_RE = re.compile(rf"^({_CB_ALT})[:_]([0-9a-fA-F-]{{36}})$")
 _TG_UUID_RE = re.compile(r"[0-9a-fA-F-]{36}")
 
 
@@ -1169,6 +1215,86 @@ async def tg_send_message(
     async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0)) as client:
         return await client.post(
             tg_url(token, "sendMessage"), json=payload, headers=tg_headers(token))
+
+
+def approval_keyboard_json(tx_id: str, action_prefix: str = "approve",
+                           reject_prefix: str = "deny") -> dict[str, Any]:
+    """Inline [Approve ✅]/[Deny ❌] for raw httpx reply_markup.
+
+    Deliberate mirror of supervisor.approval_keyboard_json() with the new
+    callback vocabulary (underscore + deny). The receiver accepts both spellings
+    (see TG_CB_PREFIXES), so old cards and new cards are tappable side by side.
+    Callback data carries the FULL 36-char uuid: Telegram's 64-byte
+    callback_data cap leaves ample room, and a short id would make a prefix
+    collision (missing vs duplicate) indistinguishable at tap time.
+    """
+    return {
+        "inline_keyboard": [[
+            {"text": "Approve ✅",
+             "callback_data": f"{action_prefix}_{tx_id}"[:64]},
+            {"text": "Deny ❌",
+             "callback_data": f"{reject_prefix}_{tx_id}"[:64]},
+        ]]
+    }
+
+
+def build_approval_card(tx: dict[str, Any]) -> str:
+    """The outbound ask: what is being bought, for how much, by whom, until when."""
+    amount = int(tx.get("amount_minor") or 0)
+    ccy = str(tx.get("currency") or "USD")
+    tier = str(tx.get("tier") or "tier2")
+    emoji = {"tier1": "🟢", "tier2": "🟡", "tier3": "🔴"}.get(tier, "🟡")
+    lines = [f"{emoji} <b>Approval requested</b> · {_escape(tier)}"]
+    if tx.get("vendor"):
+        lines.append(f"<b>{_escape(tx['vendor'])}</b> · {_escape(str(tx.get('title') or ''))}")
+    else:
+        lines.append(f"<b>{_escape(str(tx.get('title') or 'untitled intent'))}</b>")
+    lines.append(f"<b>{_escape(fmt_minor(amount, ccy))}</b>")
+    facts = []
+    if tx.get("agent_handle"):
+        facts.append(f"agent: <code>{_escape(tx['agent_handle'])}</code>")
+    facts.append(f"id: <code>{_escape(str(tx.get('transaction_id') or '')[:8])}</code>")
+    if tx.get("expires_at"):
+        facts.append(f"expires <code>{_escape(str(tx['expires_at'])[:16])}</code>")
+    lines.append(" · ".join(facts))
+    return "\n".join(lines)
+
+
+def build_decision_edit(tx: dict[str, Any], decided_at: str) -> str:
+    """Replacement body for editMessageText: the FINAL recorded state plus the
+    decision timestamp, so the card's last word is the ledger's, not the ask's."""
+    status = str(tx.get("approval_status") or "")
+    verb = {"approved": "Approved ✅", "rejected": "Denied ❌"}.get(status,
+                                                                  f"Closed · {_escape(status)}")
+    amount = int(tx.get("amount_minor") or 0)
+    ccy = str(tx.get("currency") or "USD")
+    lines = [
+        f"{verb} · <b>{_escape(str(tx.get('title') or 'intent'))}</b>",
+        f"<b>{_escape(fmt_minor(amount, ccy))}</b> · "
+        f"<code>{_escape(str(tx.get('transaction_id') or '')[:8])}</code>",
+    ]
+    if tx.get("approved_by"):
+        lines.append(f"by <code>{_escape(tx['approved_by'])}</code>")
+    lines.append(f"decided <code>{_escape(decided_at[:19])} UTC</code>")
+    return "\n".join(lines)
+
+
+async def tg_edit_message(
+    token: str, chat_id: int | str, message_id: int, text: str,
+    remove_keyboard: bool = True,
+) -> httpx.Response:
+    """Swap a card's body to its decided state; by default the buttons vanish
+    with it (reply_markup omitted = cleared), which IS the UI's 'spent' signal.
+    A 400 'message is not modified' (double tap on identical text) is normal."""
+    payload: dict[str, Any] = {
+        "chat_id": chat_id, "message_id": message_id, "text": text[:4000],
+        "parse_mode": "HTML", "disable_web_page_preview": True,
+    }
+    if not remove_keyboard:
+        payload["reply_markup"] = json.dumps({"inline_keyboard": []})
+    async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0)) as client:
+        return await client.post(
+            tg_url(token, "editMessageText"), json=payload, headers=tg_headers(token))
 
 
 async def tg_answer_callback(token: str, callback_id: str, text: str = "") -> None:
@@ -1260,6 +1386,7 @@ def build_status_report(store: FinanceStore, s: FinanceSettings) -> str:
 
 async def handle_telegram_approval(
     store: FinanceStore, token: str, callback_id: str, chat_id: int | str, data: str,
+    message_id: int | None = None,
 ) -> None:
     """Apply an inline-button tap for a tier-2 intent.
 
@@ -1268,6 +1395,12 @@ async def handle_telegram_approval(
     this module stays deployable without python-telegram-bot installed. The
     still-pending WHERE makes it idempotent and race-safe; a lost race is the
     desired outcome, reported as 'already decided', not an error.
+
+    Accepted callback_data: (approve|deny|appr|rej|reject) [:_] <full uuid>.
+    On a recorded decision the ORIGINAL card is edited (editMessageText) to the
+    final ledger state + timestamp, which doubles as the idempotency tell: a
+    spent card has no buttons left to tap. Missing message_id (older update
+    shapes, or a tap we could not correlate) falls back to a fresh reply.
     """
     match = _CALLBACK_RE.match(data or "")
     if not match:
@@ -1275,7 +1408,8 @@ async def handle_telegram_approval(
         await telegram_reply(store, token, chat_id,
                              "🤔 Unrecognised callback. Try /status or /pending.")
         return
-    action, tx_id = data.split(":", 1)[0], match.group(1)
+    action = TG_CB_PREFIXES[match.group(1)]
+    tx_id = match.group(2)
     try:
         outcome = await asyncio.to_thread(_apply_tg_decision, store, tx_id, action)
     except Exception:  # _apply_tg_decision already logged + re-raised
@@ -1284,34 +1418,38 @@ async def handle_telegram_approval(
                              f"⚠️ <b>Could not record that tap</b> for intent "
                              f"<code>{_escape(tx_id[:8])}</code> — check the service logs.")
         return
-    toast = {"decided": ("Approved ✅" if action == TG_ACTION_APPROVE else "Rejected ❌"),
+    store.log("info", "TELEGRAM",
+              f"approval tap: {action} {tx_id[:8]} -> {outcome}",
+              transaction_id=tx_id, extra={"callback_id": callback_id})
+    toast = {"decided": ("Approved ✅" if action == TG_ACTION_APPROVE else "Denied ❌"),
              "duplicate": "Already decided", "missing": "Intent not found"}[outcome]
     await tg_answer_callback(token, callback_id, toast)
     if outcome == "missing":
         await telegram_reply(store, token, chat_id,
                              f"❓ Intent <code>{_escape(tx_id[:8])}</code> not found.")
         return
+    row = await asyncio.to_thread(_fetch_decision_row, store, tx_id)
+    body = build_decision_edit(row, str(row.get("approved_at") or ""))
+    if outcome == "duplicate":
+        body += "\n(already decided earlier — nothing changed)"
+    if message_id is None:
+        await telegram_reply(store, token, chat_id, body)
+        return
+    try:
+        r = await tg_edit_message(token, chat_id, message_id, body)
+        if r.status_code >= 400 and "not modified" not in r.text:
+            log.warning("editMessageText failed (%s): %s", r.status_code, r.text[:200])
+    except (httpx.TimeoutException, httpx.NetworkError) as exc:
+        log.warning("editMessageText unreachable (non-fatal, card stays live): %s", exc)
+
+
+def _fetch_decision_row(store: FinanceStore, tx_id: str) -> dict[str, Any]:
     with store._connect() as conn, conn.cursor() as cur:
         cur.execute(
-            "select title, amount_minor, currency, approval_status, approved_by, "
-            "approved_at::text as approved_at from engine.transactions "
-            "where transaction_id = %s", (tx_id,))
-        row = cur.fetchone() or {}
-    amount = int(row.get("amount_minor") or 0)
-    ccy = str(row.get("currency") or "USD")
-    decided = row.get("approval_status")
-    approved = decided == "approved"
-    verb = {"approved": "Approved ✅", "rejected": "Rejected ❌"}.get(decided or "", "?")
-    lines = [
-        f"{verb} · <b>{_escape(row.get('title') or 'intent')}</b>",
-        f"<b>{_escape(fmt_minor(amount, ccy))}</b> · <code>{_escape(tx_id[:8])}</code>",
-    ]
-    if approved and row.get("approved_by"):
-        lines.append(f"by <code>{_escape(row['approved_by'])}</code> · "
-                     f"<code>{_escape((row.get('approved_at') or '')[:19])}</code>")
-    if outcome == "duplicate":
-        lines.append("(this intent was already decided — nothing changed)")
-    await telegram_reply(store, token, chat_id, "\n".join(lines))
+            "select transaction_id::text as transaction_id, title, amount_minor, "
+            "currency, approval_status, approved_by, approved_at::text as approved_at "
+            "from engine.transactions where transaction_id = %s", (tx_id,))
+        return dict(cur.fetchone() or {})
 
 
 def _apply_tg_decision(store: FinanceStore, tx_id: str, action: str) -> str:
@@ -1474,7 +1612,11 @@ async def telegram_webhook(
                 or not callback.get("id"):
             return {"status": "ignored"}
         chat_id = chat["id"]
-        payload = ("callback", (str(callback["id"]), data))
+        # message_id enables the edit-the-card decision path; its absence is
+        # tolerated (reply fallback), unlike the fields above.
+        msg_id = cb_msg.get("message_id") if isinstance(cb_msg, dict) else None
+        message_id = msg_id if isinstance(msg_id, int) else None
+        payload = ("callback", (str(callback["id"]), data, message_id))
 
     owner = tg_owner_chat_id()
     allowed_ips = {ip.strip() for ip in env("TELEGRAM_ALLOWED_IPS").split(",") if ip.strip()}
@@ -1499,11 +1641,65 @@ async def telegram_webhook(
                   extra={"chat_id": str(chat_id)})
         background.add_task(_telegram_phase2_text, store, token, chat_id, text)
     else:
-        callback_id, data = payload[1]
+        callback_id, data, message_id = payload[1]
         store.log("info", "TELEGRAM", f"inbound callback: {data[:100]}",
                   extra={"chat_id": str(chat_id), "callback_id": callback_id})
-        background.add_task(handle_telegram_approval, store, token, chat_id, callback_id, data)
+        background.add_task(handle_telegram_approval, store, token, chat_id, callback_id,
+                            data, message_id)
     return {"status": "ok"}
+
+
+async def notify_telegram_pending(
+    store: FinanceStore, tx_id: str, s: FinanceSettings | None = None
+) -> bool:
+    """Outbound interactive approval card for a pending tier-2 intent.
+
+    Fire-and-log, like the invoice-paid notify: a Telegram failure must not
+    5xx /spend/gate (the DB queue is the durable record — supervisor's loop and
+    /pending still cover any card we fail to deliver). message_id lands in
+    agent_logs so a later decision edit could correlate the card.
+    """
+    token = tg_token()
+    chat = tg_owner_chat_id()
+    if not token or not chat:
+        return False
+    row = await asyncio.to_thread(_fetch_gate_row, store, tx_id)
+    if not row:
+        return False
+    s = s or get_settings()
+    text = build_approval_card(row)
+    floor = s.approval_notify_floor_minor
+    if int(row.get("amount_minor") or 0) > floor:
+        text += (f"\n⚠️ over the {_escape(fmt_minor(floor, s.default_currency))} "
+                 "interactive floor")
+    try:
+        r = await tg_send_message(token, chat, text,
+                                  reply_markup=approval_keyboard_json(tx_id))
+        if r.status_code >= 400:
+            log.warning("approval card send failed (%s): %s", r.status_code, r.text[:200])
+            return False
+        msg_id = (r.json() or {}).get("result", {}).get("message_id")
+        store.log("info", "approval.alert_sent", f"interactive card sent for {tx_id[:8]}",
+                  transaction_id=tx_id, extra={"telegram_message_id": msg_id, "chat_id": chat})
+        return True
+    except (httpx.TimeoutException, httpx.NetworkError) as exc:
+        log.warning("approval card unreachable (non-fatal): %s", exc)
+        return False
+
+
+def _fetch_gate_row(store: FinanceStore, tx_id: str) -> dict[str, Any]:
+    # thin wrapper (no extra logic) so tests can monkeypatch either seam.
+    return _fetch_gate_row_raw(store, tx_id)
+
+
+def _fetch_gate_row_raw(store: FinanceStore, tx_id: str) -> dict[str, Any]:
+    with store._connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select transaction_id::text as transaction_id, title, amount_minor, "
+            "currency, tier, vendor, agent_handle, expires_at::text as expires_at "
+            "from engine.transactions where transaction_id = %s", (tx_id,))
+        row = cur.fetchone()
+        return dict(row) if row else {}
 
 
 async def _telegram_phase2_text(store: FinanceStore, token: str,
