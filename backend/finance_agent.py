@@ -1133,23 +1133,21 @@ def require_tg_token() -> str:
     return token
 
 
-def tg_headers(token: str) -> dict[str, str]:
-    """Prefer the V3 header scheme over a ?token= query string (the URL itself
-    never lands in access logs). Falls back to the query form for older proxies.
+def tg_v3_enabled() -> bool:
+    """LEGACY URL IS THE DEFAULT, on purpose. The V3 scheme (token as
+    Authorization: Bearer, /bot<method> without the token) returned 404 for this
+    deployment's token — `getMe` answers 200 on
+    https://api.telegram.org/bot<token>/getMe and 404 on the V3 form — so opting
+    in requires TELEGRAM_V3_API_TOKEN_ENABLED=true, never an unset variable."""
+    return env("TELEGRAM_V3_API_TOKEN_ENABLED").lower() in {"1", "true", "yes", "on"}
 
-    NOTE the explicit `or "true"`: this module's env() returns "" for unset
-    regardless of its default argument (a pre-existing quirk; every call site
-    compensates with its own `or`/fallback), so `env(NAME, "true")` would hand
-    back "" and silently select the query-string mode.
-    """
-    mode = (env("TELEGRAM_V3_API_TOKEN_ENABLED") or "true").lower()
-    if mode in {"1", "true", "yes", "on"}:
-        return {"Authorization": f"Bearer {token}"}
-    return {}
+
+def tg_headers(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"} if tg_v3_enabled() else {}
 
 
 def tg_url(token: str, method: str) -> str:
-    if tg_headers(token):  # header auth: clean URL
+    if tg_v3_enabled():  # header auth: token leaves the URL entirely
         return f"{TG_API_BASE}/bot{method}"
     return f"{TG_API_BASE}/bot{token}/{method}"
 
