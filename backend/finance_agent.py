@@ -1187,11 +1187,24 @@ async def tg_answer_callback(token: str, callback_id: str, text: str = "") -> No
 
 def telegram_secret_ok(provided: str | None) -> bool:
     """Telegram sends the X-Telegram-Bot-Api-Secret-Token header (set at
-    setWebhook time) on every update. Unset secret = open mode, for local dev."""
+    setWebhook time) on every update. Unset secret = open mode, FOR LOCAL DEV
+    ONLY: an empty value is logged loudly at WARNING on every update (rate-
+    limited), because a setWebhook made WITH a secret sends the header, but a
+    webhook registered WITHOUT one sends nothing — and a deployment where both
+    sides drifted empty accepts forged updates from anyone who finds the URL."""
     secret = env("TELEGRAM_WEBHOOK_SECRET")
     if not secret:
+        global _SECRET_WARNED
+        if not _SECRET_WARNED:
+            log.warning("TELEGRAM_WEBHOOK_SECRET is empty: accepting UNSIGNED "
+                        "telegram updates (production must set it, and register "
+                        "the webhook with the same secret)")
+            _SECRET_WARNED = True
         return True
     return bool(provided) and hmac.compare_digest(secret, provided)
+
+
+_SECRET_WARNED = False
 
 
 async def telegram_reply(store: FinanceStore, token: str, chat_id: int | str, text: str) -> None:
