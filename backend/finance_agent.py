@@ -470,13 +470,16 @@ class FinanceStore:
             ("idempotency_key", "%s", idempotency_key),
             ("metadata", "%s::jsonb", json.dumps(metadata or {})),
         ]
-        # Placeholders are positional (%s1, %s2, ...): each column names the value
-        # it binds, so the alignment that broke once is enforced by the DB itself
-        # instead of by the order two lists happen to be written in.
+        # Placeholders stay PLAIN %s, consumed in list order: the (col, expr,
+        # value) triples keep binding and cast aligned by construction. The
+        # short-indexed form (%s1) this used to emit was a psycopg2-ism —
+        # psycopg3 only honours named placeholders like %(name)s, and under
+        # client-side binding "%s1::x" degrades to "$11::x", which PostgreSQL
+        # cannot type: IndeterminateDatatype on the FIRST gated spend ever to
+        # hit /spend/gate in production (proven on the live PG16: bare %s +
+        # cast OK, %s1 + cast fails with any parameter count).
         cols = ", ".join(col for col, _, _ in fields)
-        vals = ", ".join(
-            expr.replace("%s", f"%s{i}", 1) for i, (_, expr, _) in enumerate(fields, 1)
-        )
+        vals = ", ".join(expr for _, expr, _ in fields)
         params = tuple(bound for _, _, bound in fields)
         sql = (
             f"insert into engine.transactions ({cols}) values ({vals}) "  # noqa: S608
