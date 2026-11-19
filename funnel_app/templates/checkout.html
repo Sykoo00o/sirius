@@ -25,7 +25,7 @@
   <form method="post" class="mt-7 space-y-4" novalidate>
 
     {# --- price block: checklist slots 1-4, adjacent to the card field --- #}
-    <div class="rounded-2xl border-2 border-ember/40 bg-ember-soft p-5">
+    <div class="rounded-3xl border-2 border-ember/40 bg-ember-soft p-5 shadow-[0_4px_14px_rgba(232,89,12,0.10)]">
       <p class="text-lg sm:text-xl font-bold leading-snug text-balance">{{ copy.disclosure('price_line') }}</p>
       <ul class="mt-3 space-y-1.5 text-sm">
         {% for key in ('renewal_line', 'refund_line', 'cancel_line') %}
@@ -40,7 +40,7 @@
     </div>
 
     {# --- what unlocks, restated at the moment of paying --- #}
-    <div class="rounded-2xl border border-line bg-white p-5">
+    <div class="surface-float rounded-3xl bg-white p-5">
       <h2 class="font-semibold text-sm uppercase tracking-wide text-muted">What {{ copy.trial_amount }} gets you for {{ copy.trial_days }} days</h2>
       <ul class="mt-3 space-y-2 text-sm">
         {% for item in unlock_items %}
@@ -113,8 +113,10 @@
       <a class="underline decoration-line underline-offset-2" href="/policy/refund">refund policy</a>.
     </p>
 
+    {# Visual pass only (UI_POLISH_PLAN.md step 6). The price block above keeps its layout:
+       its adjacency to the card fields is a disclosure requirement, not a style. #}
     <button type="submit"
-            class="w-full rounded-2xl bg-ember px-6 py-4 text-lg font-semibold text-white shadow-sm transition hover:bg-ember-dark active:translate-y-px">
+            class="btn-primary w-full rounded-2xl px-6 py-4 text-lg font-semibold">
       Start my trial for {{ copy.trial_amount }}
     </button>
 

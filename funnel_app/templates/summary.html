@@ -13,7 +13,7 @@
 #}
 <section class="mx-auto max-w-copy px-4 pt-8 pb-16">
 
-  <div class="rounded-2xl bg-moss-soft border border-moss/20 px-5 py-4">
+  <div class="rounded-3xl bg-moss-soft border border-moss/20 px-5 py-4">
     <h1 class="text-xl font-bold tracking-tight">{{ total }} answers, all yours</h1>
     <p class="text-sm text-muted mt-1.5 leading-relaxed">
       Read them back. This is the whole input your plan is built from, and it is the
@@ -25,7 +25,7 @@
   {% for group in rows %}
     <section class="mt-8" aria-labelledby="grp-{{ group.key }}">
       <h2 id="grp-{{ group.key }}" class="text-xs font-semibold uppercase tracking-wider text-ember-dark">{{ group.title }}</h2>
-      <dl class="mt-3 divide-y divide-line rounded-2xl border border-line bg-white overflow-hidden">
+      <dl class="surface-float mt-3 divide-y divide-line rounded-3xl bg-white overflow-hidden">
         {% for entry in group.entries %}
           <div class="px-4 py-3.5">
             <dt class="text-sm font-medium text-muted">{{ entry.question.title }}</dt>
@@ -49,11 +49,11 @@
     </section>
   {% endfor %}
 
-  <div class="mt-9 rounded-2xl bg-ink text-paper p-6">
+  <div class="panel mt-9 bg-ink text-paper p-6 sm:p-7">
     <h2 class="text-lg font-bold">Your week, from these answers</h2>
     <p class="text-paper/80 text-sm mt-2 leading-relaxed">{{ plan.summary }}</p>
     <a href="/preview"
-       class="mt-5 inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl bg-white text-ink px-6 py-3.5 font-semibold transition hover:bg-paper active:translate-y-px">
+       class="btn-primary mt-5 inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl px-6 py-3.5 font-semibold">
       Show my week 1 <span aria-hidden="true">&rarr;</span>
     </a>
     <p class="mt-3 text-xs text-paper/70">Free to look at. No card detail is asked for on the next page.</p>
