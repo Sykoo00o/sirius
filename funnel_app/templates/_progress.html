@@ -1,8 +1,9 @@
 {#
   Progress indicator, shared by the quiz steps and the summary.
 
-  `aria-valuemax` uses 12, not 13, because the thirteenth step is the checkpoint, which
-  is not a question. Announcing 13 would promise a question that does not exist.
+  `aria-valuenow` is the answered percentage, so `aria-valuemax` is 100. It used to be
+  `total` (12), which told a screen reader "100 of 12" on the last question. The question
+  count is already spoken by the "Question N of 12" line above the bar.
 #}
 {% set answered = progress | int %}
 <div class="space-y-2">
@@ -14,9 +15,9 @@
     </span>
   </div>
   <div class="h-2 rounded-full bg-line overflow-hidden"
-       role="progressbar" aria-valuenow="{{ answered }}" aria-valuemin="0" aria-valuemax="{{ total }}"
+       role="progressbar" aria-valuenow="{{ answered }}" aria-valuemin="0" aria-valuemax="100"
        aria-label="Questions answered">
-    <div class="h-full bg-ember rounded-full transition-[width] duration-300 ease-out" style="width: {{ answered }}%"></div>
+    <div class="h-full rounded-full transition-[width] duration-300 ease-out" style="width: {{ answered }}%; background-image: var(--grad-accent)"></div>
   </div>
   {# Section dots: where you are in the four-part structure, which reads faster than a
      percentage when you are deciding whether to keep going. #}
