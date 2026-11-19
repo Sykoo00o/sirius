@@ -1,0 +1,96 @@
+<!doctype html>
+{#
+  Shared chrome. Two rules enforced here rather than per page:
+
+  1. Footer links to Terms, Privacy and Refund on every page. The disclosure checklist
+     wants the policy reachable from checkout, and a footer include is the version of
+     that which cannot be forgotten on one page.
+  2. Amounts always arrive from `copy` (built from settings). No template may type a
+     price, which is how a stale number survives a price change.
+#}
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{{ brand }}{% endblock %}</title>
+<meta name="description" content="{{ copy.hero_sub | striptags | truncate(155, true) }}">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23e8590c'/><path d='M28 68 L50 30 L72 68' stroke='white' stroke-width='10' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<link rel="stylesheet" href="/static/app.css">
+<script src="https://cdn.tailwindcss.com/3.4.16"></script>
+<script>
+  // Warm-light palette as tokens, so a page never hardcodes a hex and drifts.
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          paper:  '#fdfbf7',
+          cream:  '#f6f1e7',
+          line:   '#e7ded0',
+          ink:    '#2b2622',
+          muted:  '#6f665c',
+          ember:  { DEFAULT: '#e8590c', dark: '#c74a08', soft: '#fff1e8' },
+          moss:   { DEFAULT: '#4a7c59', soft: '#eef4ef' },
+        },
+        fontFamily: {
+          sans: ['ui-rounded', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+        },
+        maxWidth: { copy: '42rem' },
+      }
+    }
+  }
+</script>
+<style>
+  :root { color-scheme: light; }
+  body { background: #fdfbf7; color: #2b2622; -webkit-font-smoothing: antialiased; }
+  /* Focus rings kept visible: a funnel that hides focus on a keyboard is a funnel
+     nobody can leave. */
+  :focus-visible { outline: 3px solid #e8590c; outline-offset: 2px; border-radius: 6px; }
+  .option-card:has(input:checked) { border-color: #e8590c; background: #fff1e8; box-shadow: 0 1px 0 #f3c9ae; }
+  .option-card input:focus-visible + span { outline: none; }
+  details > summary { list-style: none; cursor: pointer; }
+  details > summary::-webkit-details-marker { display: none; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body class="min-h-screen flex flex-col font-sans antialiased">
+
+<a href="#main" class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:bg-ember focus:text-white focus:px-3 focus:py-2 focus:rounded-lg">Skip to content</a>
+
+<header class="border-b border-line bg-paper/90 backdrop-blur sticky top-0 z-30">
+  <div class="mx-auto max-w-5xl px-4 h-14 flex items-center justify-between">
+    <a href="/" class="flex items-center gap-2 font-semibold tracking-tight">
+      <span class="w-6 h-6 rounded-md bg-ember grid place-items-center text-white text-xs font-bold" aria-hidden="true">R</span>
+      {{ brand }}
+    </a>
+    {% block header_aside %}{% endblock %}
+  </div>
+</header>
+
+<main id="main" class="flex-1">{% block main %}{% endblock %}</main>
+
+<footer class="mt-16 border-t border-line bg-cream">
+  <div class="mx-auto max-w-5xl px-4 py-8 text-sm text-muted space-y-3">
+    <p class="font-medium text-ink">{{ brand }} &middot; routine structure and meal organisation</p>
+    <p>Routine structure and meal organisation only. Not medical advice, not a diagnosis, and no body-composition promise. See the terms page.</p>
+    <nav class="flex flex-wrap gap-x-5 gap-y-2 pt-1">
+      <a class="underline decoration-line underline-offset-4 hover:text-ink" href="/policy/terms">Terms</a>
+      <a class="underline decoration-line underline-offset-4 hover:text-ink" href="/policy/privacy">Privacy</a>
+      <a class="underline decoration-line underline-offset-4 hover:text-ink" href="/policy/refund">Refund policy</a>
+      <a class="underline decoration-line underline-offset-4 hover:text-ink" href="mailto:{{ support_email }}">Contact</a>
+      <a class="underline decoration-line underline-offset-4 hover:text-ink" href="/health" rel="nofollow">Site checks</a>
+    </nav>
+    <p class="text-xs pt-1">{{ copy.disclaimer }}</p>
+  </div>
+</footer>
+
+{% if not charges_enabled %}
+{# Rehearsal banner. It says so on every page because the opposite failure, a visitor
+   entering card details expecting a charge that never happens, is exactly the
+   "I never signed up" confusion the disclosure checklist exists to prevent. #}
+<div role="status" class="fixed bottom-3 left-3 right-3 sm:left-auto sm:right-4 sm:max-w-xs bg-ink text-paper text-xs rounded-xl px-4 py-3 shadow-lg">
+  <strong class="block mb-0.5">Rehearsal mode</strong>
+  No card is charged anywhere on this site yet, and no recurring payment exists. This funnel is being tested before it takes money.
+</div>
+{% endif %}
+</body>
+</html>

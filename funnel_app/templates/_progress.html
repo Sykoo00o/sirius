@@ -1,0 +1,29 @@
+{#
+  Progress indicator, shared by the quiz steps and the summary.
+
+  `aria-valuemax` uses 12, not 13, because the thirteenth step is the checkpoint, which
+  is not a question. Announcing 13 would promise a question that does not exist.
+#}
+{% set answered = progress | int %}
+<div class="space-y-2">
+  <div class="flex items-baseline justify-between text-sm">
+    <span class="font-medium text-muted">{{ section_title }}</span>
+    <span class="text-muted tabular-nums">
+      {% if step_number %}Question {{ step_number }} of {{ total }}{% else %}All {{ total }} answered{% endif %}
+      &middot; {{ answered }}%
+    </span>
+  </div>
+  <div class="h-2 rounded-full bg-line overflow-hidden"
+       role="progressbar" aria-valuenow="{{ answered }}" aria-valuemin="0" aria-valuemax="{{ total }}"
+       aria-label="Questions answered">
+    <div class="h-full bg-ember rounded-full transition-[width] duration-300 ease-out" style="width: {{ answered }}%"></div>
+  </div>
+  {# Section dots: where you are in the four-part structure, which reads faster than a
+     percentage when you are deciding whether to keep going. #}
+  <ol class="flex gap-1.5 pt-0.5" aria-hidden="true">
+    {% for key, label in sections %}
+      <li class="flex-1 h-1.5 rounded-full {% if loop.index0 <= section_index %}bg-ember/70{% else %}bg-line{% endif %}"
+          title="{{ label }}"></li>
+    {% endfor %}
+  </ol>
+</div>

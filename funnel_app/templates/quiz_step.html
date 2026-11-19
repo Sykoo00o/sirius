@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Question {{ step_number }} of {{ total }} &middot; {{ brand }}{% endblock %}
+
+{% block main %}
+{#
+  One question per screen, auto-advance on tap for single-choice, plus an explicit
+  Continue for keyboard and screen-reader users. Multi-choice never auto-submits:
+  submitting on the first tap would make "pick all that apply" impossible to answer.
+
+  The form posts to *this* question's route, not the next one. That is what lets an
+  invalid answer re-render the page the visitor is looking at, and what makes changing a
+  previous answer a plain Back press rather than a restart. A sunk-effort funnel that will
+  not let you fix an answer reads as a trap, and a trap at minute four is where people
+  close the tab.
+
+  Answered questions render their stored choice, so Back shows what you picked instead of
+  an empty form, which is the difference between editing and re-taking.
+#}
+<section class="mx-auto max-w-copy px-4 pt-6 pb-16">
+
+  <div class="sticky -top-14 z-20 -mx-4 px-4 py-4 bg-paper/95 backdrop-blur border-b border-line">
+    {% include "_progress.html" %}
+  </div>
+
+  <div class="pt-7">
+    <p class="text-xs font-semibold uppercase tracking-wider text-ember-dark">{{ section_title }}</p>
+    <h1 class="mt-2 text-2xl sm:text-3xl font-bold tracking-tight text-balance">{{ question.title }}</h1>
+    <p class="mt-2.5 text-muted leading-relaxed">{{ question.help }}</p>
+    {% if question.kind == 'multi' %}
+      <p class="mt-2 text-sm text-muted italic">Pick every one that applies.</p>
+    {% endif %}
+  </div>
+
+  {% if errors %}
+    <div role="alert" class="mt-5 rounded-xl border border-ember/40 bg-ember-soft px-4 py-3 text-sm">
+      {% for error in errors %}<p>{{ error }}</p>{% endfor %}
+    </div>
+  {% endif %}
+
+  <form method="post" action="/onboarding/{{ step }}" class="mt-6 space-y-2.5" id="quiz-form" data-kind="{{ question.kind }}">
+    {% for value, label in question.options %}
+      {% set input_id = 'opt-' ~ value %}
+      <label for="{{ input_id }}" class="option-card group flex items-start gap-3 rounded-2xl border border-line bg-white px-4 py-3.5 cursor-pointer transition hover:border-ember/50">
+        <input class="mt-0.5 w-5 h-5 accent-[#e8590c] shrink-0"
+               type="{{ 'radio' if question.kind == 'single' else 'checkbox' }}"
+               name="{{ 'answer' if question.kind == 'single' else question.key }}"
+               id="{{ input_id }}" value="{{ value }}"
+               {% if value in answered %}checked{% endif %}
+               data-autosubmit="{{ 'true' if question.kind == 'single' else 'false' }}">
+        <span class="leading-snug">{{ label }}</span>
+      </label>
+    {% endfor %}
+
+    {% if question.allow_note %}
+      <div class="pt-3">
+        <label for="note" class="block text-sm font-medium">Anything else that shapes your week? <span class="text-muted font-normal">(optional)</span></label>
+        <textarea name="note" id="note" maxlength="{{ 280 }}" rows="2"
+                  class="mt-1.5 w-full rounded-xl border border-line bg-white px-3.5 py-2.5 text-base placeholder:text-muted/60"
+                  placeholder="Shift work, a knee that complains, a deadline that owns your evenings">{{ saved_note }}</textarea>
+        <p class="mt-1 text-xs text-muted">Genuinely used. It becomes the fallback rule on your plan.</p>
+      </div>
+    {% endif %}
+
+    <div class="flex items-center justify-between gap-3 pt-4">
+      {% if step > 0 %}
+        {# Back is a GET to the previous question, which is already answered, so it lands
+           and shows the stored choice rather than bouncing off a progress guard. #}
+        <a href="/onboarding/{{ step - 1 }}"
+           class="rounded-xl px-4 py-3 text-sm font-medium text-muted underline decoration-line underline-offset-4 hover:text-ink">&larr; Back</a>
+      {% else %}
+        <a href="/" class="rounded-xl px-4 py-3 text-sm font-medium text-muted underline decoration-line underline-offset-4 hover:text-ink">Quit</a>
+      {% endif %}
+      <button type="submit"
+              class="rounded-2xl bg-ember px-6 py-3.5 font-semibold text-white shadow-sm transition hover:bg-ember-dark active:translate-y-px">
+        {% if answered %}{{ 'Next question' if step + 1 < total else 'See my summary' }}
+        {% else %}{{ 'Continue' if step + 1 < total else 'Finish' }}{% endif %}
+        <span aria-hidden="true">&rarr;</span>
+      </button>
+    </div>
+  </form>
+
+  <p class="mt-6 text-xs text-muted leading-relaxed">
+    Your answers save as you go, so a dropped connection does not cost you the quiz.
+    Nothing is charged, and no account is needed to see week 1.
+  </p>
+</section>
+
+<script>
+(function () {
+  var form = document.getElementById('quiz-form');
+  if (!form || form.dataset.kind !== 'single') return;
+  // Auto-submit on single-choice tap, with a beat so the selection is visible before the
+  // page changes. Guard against double-submit, which would POST the same answer twice.
+  var submitted = false;
+  form.querySelectorAll('input[data-autosubmit="true"]').forEach(function (input) {
+    input.addEventListener('change', function () {
+      if (submitted || !form.reportValidity()) return;
+      submitted = true;
+      setTimeout(function () { form.requestSubmit(); }, 220);
+    });
+  });
+})();
+</script>
+{% endblock %}

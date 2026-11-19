@@ -1,0 +1,28 @@
+/* Progressive enhancement only. Tailwind carries the design; this file exists for the
+   two things a utility pass cannot express portably: a print stylesheet for the plan,
+   and a reduced-motion path for the progress transitions.
+
+   Print matters commercially, not cosmetically. Export is a paid feature, and a visitor
+   who prints or saves the free week 1 as PDF is someone who found the artefact useful,
+   which is the signal the trial is priced on. */
+
+@media print {
+  header, footer, [role="status"], details > summary::after, .no-print { display: none !important; }
+  details > div { display: block !important; }   /* expanded or not, print shows everything */
+  body { background: #fff; color: #000; }
+  main { max-width: none; }
+  a[href^="http"]::after { content: ""; }        /* no URL spam on a printed plan */
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  details[open] > div { animation: reveal 140ms ease-out; }
+}
+
+@keyframes reveal {
+  from { opacity: 0; transform: translateY(-2px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Locked content stays readable. The lock is honest about *what* is missing, so it is
+   typeset as information rather than as a teaser you cannot read. */
+.locked-card { }

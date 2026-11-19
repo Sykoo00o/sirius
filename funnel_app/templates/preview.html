@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% block title %}Your week 1 &middot; {{ brand }}{% endblock %}
+
+{% block main %}
+{#
+  The pre-paywall artefact. Rules this page obeys, all of them load-bearing:
+
+  1. Week 1 renders completely. Real blocks, real minutes, real meal slots. Nothing is
+     blurred, greyed or truncated, and there is no "sign up to see your results" gate,
+     because the artefact is the thing that must survive being inspected.
+  2. Weeks 2-4 are genuinely absent, not hidden. The lock shows *what changes*, which is
+     true from WEEK_ARCS, and not a fake number.
+  3. The recurring price sits on this page too, above the fold on mobile. The checklist
+     requires it next to the card field; showing it one screen earlier costs nothing and
+     filters the cohort.
+#}
+
+<section class="border-b border-line bg-gradient-to-b from-moss-soft to-paper">
+  <div class="mx-auto max-w-copy px-4 pt-8 pb-7">
+    <p class="text-xs font-semibold uppercase tracking-wider text-moss">Week 1 of 4 &middot; free to read</p>
+    <h1 class="mt-2 text-[1.7rem] sm:text-4xl font-bold tracking-tight leading-[1.12] text-balance">{{ plan.headline }}</h1>
+    <p class="mt-3 text-muted leading-relaxed">{{ plan.coach_note }}</p>
+
+    <dl class="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
+      {% for stat in [
+        ('Training days', plan.days_per_week),
+        ('Minutes each', plan.session_minutes),
+        ('Split', plan.split_label.split(',')[0]),
+        ('Inputs used', total),
+      ] %}
+        <div class="rounded-xl bg-white border border-line px-2 py-3">
+          <dt class="text-[11px] uppercase tracking-wide text-muted">{{ stat[0] }}</dt>
+          <dd class="mt-0.5 font-bold leading-tight">{{ stat[1] }}</dd>
+        </div>
+      {% endfor %}
+    </dl>
+  </div>
+</section>
+
+{# ---------------- Week 1, unlocked ---------------- #}
+<section class="mx-auto max-w-copy px-4 pt-8" aria-labelledby="week1">
+  <div class="flex items-baseline justify-between gap-3">
+    <h2 id="week1" class="text-xl font-bold tracking-tight">Your seven days</h2>
+    <span class="text-xs font-semibold uppercase tracking-wider text-moss">Unlocked</span>
+  </div>
+  <p class="mt-1.5 text-sm text-muted leading-relaxed">{{ plan.week_arc.arc }}</p>
+
+  <ol class="mt-5 space-y-3">
+    {% for day in plan.days %}
+      <li class="rounded-2xl border {% if day.is_training_day %}border-line bg-white{% else %}border-dashed border-line bg-cream/60{% endif %} overflow-hidden">
+        <details {% if day.is_training_day and loop.index <= 2 %}open{% endif %}>
+          <summary class="px-4 py-3.5 flex items-center gap-3">
+            <span class="w-11 shrink-0">
+              <span class="block text-[11px] uppercase tracking-wide text-muted">{{ day.day[:3] }}</span>
+              <span class="block font-bold leading-none {% if day.is_training_day %}text-ember-dark{% else %}text-muted{% endif %}">
+                {{ day.session.minutes }}m
+              </span>
+            </span>
+            <span class="flex-1 min-w-0">
+              <span class="block font-semibold leading-snug">{{ day.session.name }}</span>
+              <span class="block text-xs text-muted mt-0.5 truncate">
+                {% if day.is_training_day %}{{ day.session.blocks | length }} blocks &middot; {{ day.focus_metric }}
+                {% else %}Recovery &middot; no session required{% endif %}
+              </span>
+            </span>
+            <span class="shrink-0 text-muted" aria-hidden="true">
+              {% if day.is_training_day %}&#9662;{% else %}&#8226;{% endif %}
+            </span>
+          </summary>
+
+          <div class="px-4 pb-4 pt-1 border-t border-line/70 space-y-4">
+            <div>
+              <h3 class="text-[11px] font-semibold uppercase tracking-wider text-muted">Session structure</h3>
+              <ol class="mt-2 space-y-1.5">
+                {# `Session.blocks` is dataclass-free tuples of (label, minutes). #}
+                {% for block in day.session.blocks %}
+                  <li class="flex items-start gap-3 text-sm">
+                    <span class="tabular-nums font-semibold text-ember-dark shrink-0 w-10">{{ block[1] }}m</span>
+                    <span>{{ block[0] }}</span>
+                  </li>
+                {% endfor %}
+              </ol>
+              <p class="mt-2.5 text-sm rounded-lg bg-cream border border-line px-3 py-2">
+                <span class="font-semibold">Effort:</span> {{ day.session.rpe_guide }}
+              </p>
+            </div>
+
+            <div>
+              <h3 class="text-[11px] font-semibold uppercase tracking-wider text-muted">Meal structure</h3>
+              <dl class="mt-2 space-y-1.5 text-sm">
+                {# The loop variable is *not* named `slot`. Meal rows are plain
+                   (slot, ideas) tuples, and Jinja resolves `slot.slot` by trying
+                   `slot['slot']` first: on a tuple that subscript raises TypeError rather
+                   than LookupError, which Jinja catches and turns into Undefined. The
+                   symptom is a silently blank day card, not an error, so the whole artefact
+                   renders with empty meal rows and no traceback anywhere. `meal` names the
+                   row and keeps that trap out of reach. #}
+                {% for meal in day.meal_structure %}
+                  <div class="flex gap-3">
+                    <dt class="w-20 shrink-0 text-muted">{{ meal[0] }}</dt>
+                    <dd class="flex-1">{{ meal[1] }}</dd>
+                  </div>
+                {% endfor %}
+              </dl>
+              <p class="mt-2 text-xs text-muted">Ideas for assembly, not prescriptions. Swap freely within the same slot: the structure is what counts.</p>
+            </div>
+
+            <div class="rounded-xl bg-moss-soft border border-moss/20 px-3 py-2.5 text-sm">
+              <span class="font-semibold">Metric to log:</span> {{ day.focus_metric }}
+            </div>
+          </div>
+        </details>
+      </li>
+    {% endfor %}
+  </ol>
+</section>
+
+{# ---------------- Metrics + fallback ---------------- #}
+<section class="mx-auto max-w-copy px-4 pt-9">
+  <h2 class="text-xl font-bold tracking-tight">What you track, and why</h2>
+  <table class="mt-4 w-full text-sm border-collapse">
+    <thead>
+      <tr class="text-left text-[11px] uppercase tracking-wider text-muted">
+        <th scope="col" class="pb-2 font-semibold">Metric</th>
+        <th scope="col" class="pb-2 font-semibold">Target</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-line">
+      {# Positional again, for the same reason as the meal rows: `plan.metrics` is a tuple
+         of (label, target, why) tuples, so `metric.label` is Undefined and the table would
+         render as empty rows under a "Metric / Target" header. Named fields would read
+         better and are the right fix if this grows; until then, indexing is the form that
+         cannot fail quietly. #}
+      {% for row in plan.metrics %}
+        <tr class="align-top">
+          <td class="py-3 pr-3 font-medium">{{ row[0] }}</td>
+          <td class="py-3">
+            <span class="block">{{ row[1] }}</span>
+            <span class="block text-xs text-muted mt-0.5 leading-relaxed">{{ row[2] }}</span>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="mt-5 rounded-2xl border border-ember/30 bg-ember-soft px-4 py-4">
+    <h3 class="font-semibold text-ember-dark">The fallback rule for your blocker</h3>
+    <p class="mt-1.5 text-sm leading-relaxed">{{ plan.fallback_rule }}</p>
+    <p class="mt-2 text-xs text-muted">Built from the one question most planners skip: what actually breaks the streak.</p>
+  </div>
+</section>
+
+{# ---------------- Weeks 2-4, locked ---------------- #}
+<section class="mx-auto max-w-copy px-4 pt-10" aria-labelledby="locked">
+  <div class="flex items-baseline justify-between gap-3">
+    <h2 id="locked" class="text-xl font-bold tracking-tight">Weeks 2 to 4</h2>
+    <span class="text-xs font-semibold uppercase tracking-wider text-muted">Locked</span>
+  </div>
+  <p class="mt-1.5 text-sm text-muted leading-relaxed">
+    These are written from your week 1 log, which is why they cannot be shown yet: week 2
+    changes depending on what week 1 told us.
+  </p>
+
+  <ol class="mt-4 space-y-2.5">
+    {% for arc in locked_weeks %}
+      <li class="relative rounded-2xl border border-line bg-cream/70 px-4 py-3.5">
+        <div class="flex items-center gap-2">
+          <span class="text-muted" aria-hidden="true">&#128274;</span>
+          <span class="font-semibold">Week {{ arc.week }} &middot; {{ arc.label }}</span>
+        </div>
+        <p class="mt-1 text-sm text-muted leading-relaxed">{{ arc.arc }}</p>
+      </li>
+    {% endfor %}
+  </ol>
+
+  <div class="mt-4 rounded-2xl border border-line bg-white p-5">
+    <h3 class="font-semibold text-sm uppercase tracking-wide text-muted">The trial adds</h3>
+    <ul class="mt-3 space-y-2 text-sm">
+      {% for item in unlock_items %}
+        <li class="flex gap-2"><span class="text-ember shrink-0" aria-hidden="true">&#43;</span><span>{{ item }}</span></li>
+      {% endfor %}
+    </ul>
+  </div>
+</section>
+
+{# ---------------- The ask ---------------- #}
+<section class="mx-auto max-w-copy px-4 pt-10 pb-16" aria-labelledby="unlock">
+  <div class="rounded-3xl bg-ink text-paper p-6 sm:p-7">
+    <h2 id="unlock" class="text-2xl font-bold tracking-tight">Week 1 was built from {{ total }} answers</h2>
+    <p class="mt-2 text-paper/85 leading-relaxed">
+      Weeks 2 to 4, exports, and the weekly adjustments are {{ copy.trial_amount }} for
+      {{ copy.trial_days }} days. If week 1 was not worth reading, you have lost nothing:
+      it cost nothing and no card detail was asked for.
+    </p>
+
+    <div class="mt-5 space-y-2 text-sm">
+      {% for key, text in copy.disclosures.items() %}
+        <p class="flex gap-2"><span class="text-ember shrink-0 mt-0.5" aria-hidden="true">&#10003;</span><span>{{ text }}</span></p>
+      {% endfor %}
+    </div>
+
+    <a href="/checkout"
+       class="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-ember px-6 py-4 text-lg font-semibold text-white transition hover:bg-ember-dark active:translate-y-px">
+      Unlock weeks 2 to 4 <span aria-hidden="true">&rarr;</span>
+    </a>
+    <p class="mt-3 text-xs text-paper/70 text-center">
+      Or keep week 1 and do nothing. It is yours either way, and this page stays open.
+    </p>
+  </div>
+
+  <p class="mt-5 text-xs text-muted leading-relaxed">
+    Plan reference <code class="rounded bg-cream border border-line px-1.5 py-0.5">{{ plan.profile_signature }}</code>.
+    Same {{ total }} answers, same plan, every time: this one came from the routine builder
+    {% if llm_live %}with a written-by-the-model coach note{% else %}including its coach note, written by us{% endif %}.
+    Nothing about your schedule, your equipment or your meal structure was invented.
+  </p>
+</section>
+{% endblock %}

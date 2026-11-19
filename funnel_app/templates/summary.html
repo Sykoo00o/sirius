@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Your answers &middot; {{ brand }}{% endblock %}
+
+{% block main %}
+{#
+  The sunk-effort checkpoint. Placed deliberately *between* the last question and the
+  artefact: this is where the effort becomes visible as a thing the user built, and
+  where a mis-click is still free to fix.
+
+  It is also an honesty device. Showing thirteen inputs back in the user's own wording,
+  then showing a plan that demonstrably uses them, is what makes the artefact look
+  derived rather than decorative, which is the difference a deception review looks for.
+#}
+<section class="mx-auto max-w-copy px-4 pt-8 pb-16">
+
+  <div class="rounded-2xl bg-moss-soft border border-moss/20 px-5 py-4">
+    <h1 class="text-xl font-bold tracking-tight">{{ total }} answers, all yours</h1>
+    <p class="text-sm text-muted mt-1.5 leading-relaxed">
+      Read them back. This is the whole input your plan is built from, and it is the
+      only input: {{ total }} answers that each change something specific in the output.
+      Change one now if it is wrong. It is free, and it moves the plan.
+    </p>
+  </div>
+
+  {% for group in rows %}
+    <section class="mt-8" aria-labelledby="grp-{{ group.key }}">
+      <h2 id="grp-{{ group.key }}" class="text-xs font-semibold uppercase tracking-wider text-ember-dark">{{ group.title }}</h2>
+      <dl class="mt-3 divide-y divide-line rounded-2xl border border-line bg-white overflow-hidden">
+        {% for entry in group.entries %}
+          <div class="px-4 py-3.5">
+            <dt class="text-sm font-medium text-muted">{{ entry.question.title }}</dt>
+            <dd class="mt-1 font-medium">
+              {% for label in entry.labels %}
+                <span class="inline-block mr-1.5 mb-1 rounded-lg bg-cream border border-line px-2.5 py-1 text-sm">{{ label }}</span>
+              {% else %}
+                <span class="text-muted font-normal text-sm italic">Not answered</span>
+              {% endfor %}
+            </dd>
+            {% if entry.note %}
+              <dd class="mt-1.5 text-sm text-muted italic leading-relaxed">&ldquo;{{ entry.note }}&rdquo;</dd>
+            {% endif %}
+            <dd class="mt-2">
+              <a href="/onboarding/{{ entry.position }}"
+                 class="text-xs font-medium text-ember-dark underline decoration-ember/40 underline-offset-2">Change</a>
+            </dd>
+          </div>
+        {% endfor %}
+      </dl>
+    </section>
+  {% endfor %}
+
+  <div class="mt-9 rounded-2xl bg-ink text-paper p-6">
+    <h2 class="text-lg font-bold">Your week, from these answers</h2>
+    <p class="text-paper/80 text-sm mt-2 leading-relaxed">{{ plan.summary }}</p>
+    <a href="/preview"
+       class="mt-5 inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl bg-white text-ink px-6 py-3.5 font-semibold transition hover:bg-paper active:translate-y-px">
+      Show my week 1 <span aria-hidden="true">&rarr;</span>
+    </a>
+    <p class="mt-3 text-xs text-paper/70">Free to look at. No card detail is asked for on the next page.</p>
+  </div>
+
+  <p class="mt-6 text-xs text-muted">
+    Started over? <a href="/onboarding/0" class="underline decoration-line underline-offset-2">Answer again from question 1</a>.
+  </p>
+</section>
+{% endblock %}
