@@ -15,39 +15,39 @@
      filters the cohort.
 #}
 
-{# Visual pass (UI_POLISH_PLAN.md step 5): header as an inset panel, cards lifted by
-   shadow, day cards staggered in, caret rotates on open. The final ask block carries the
-   prices and all four disclosures, so it is never `.reveal`. #}
-<section class="px-3 pt-3 sm:px-4 sm:pt-4">
-  <div class="panel relative overflow-hidden bg-gradient-to-b from-moss-soft to-[#fffaf5]">
+{# Visual pass (UI_POLISH_PLAN.md step 5, then the simple.life reference pattern in
+   `capture/plan.md`): header as one inset tinted band with the reference's air inside it,
+   eyebrow as a pill, cards lifted by shadow, day cards staggered in, caret rotates on open.
+   The final ask block carries the prices and all four disclosures, so it is never `.reveal`. #}
+<div class="px-3 pt-3 sm:px-4 sm:pt-4 space-y-3 sm:space-y-4">
+<section data-section="preview-header" class="band band-tint relative overflow-hidden">
   <div class="pointer-events-none absolute -top-24 -right-16 h-72 w-72 rounded-full bg-moss/15 blur-3xl" aria-hidden="true"></div>
-  <div class="relative mx-auto max-w-copy px-4 sm:px-6 pt-8 pb-8 sm:pt-12 sm:pb-10">
-    <p class="text-xs font-semibold uppercase tracking-wider text-moss">Week 1 of 4 &middot; free to read</p>
-    <h1 class="mt-2 text-[28px] leading-[32px] tracking-[-1px] sm:text-[40px] sm:leading-[44px] sm:tracking-[-1.8px] font-semibold text-balance">{{ plan.headline }}</h1>
-    <p class="mt-3 text-muted leading-relaxed">{{ plan.coach_note }}</p>
+  <div class="relative mx-auto max-w-copy text-center">
+    <p class="eyebrow eyebrow-moss">Week 1 of 4 &middot; free to read</p>
+    <h1 class="display mt-5 !text-[32px] !leading-[38px] !tracking-[-1.3px] sm:!text-[48px] sm:!leading-[52px] sm:!tracking-[-2.2px]">{{ plan.headline }}</h1>
+    <p class="mt-4 text-lg text-muted leading-relaxed">{{ plan.coach_note }}</p>
 
-    <dl class="stagger mt-6 grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
+    <dl class="stagger mt-8 grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
       {% for stat in [
         ('Training days', plan.days_per_week),
         ('Minutes each', plan.session_minutes),
         ('Split', plan.split_label.split(',')[0]),
         ('Inputs used', total),
       ] %}
-        <div class="reveal surface-float rounded-2xl bg-white px-2 py-3" style="--i: {{ loop.index0 }}">
+        <div class="reveal surface-float rounded-2xl bg-white px-2 py-4" style="--i: {{ loop.index0 }}">
           <dt class="text-[11px] uppercase tracking-wide text-muted">{{ stat[0] }}</dt>
-          <dd class="mt-0.5 font-bold leading-tight">{{ stat[1] }}</dd>
+          <dd class="mt-1 text-xl font-bold leading-tight tracking-[-0.5px]">{{ stat[1] }}</dd>
         </div>
       {% endfor %}
     </dl>
   </div>
-  </div>
 </section>
 
 {# ---------------- Week 1, unlocked ---------------- #}
-<section class="mx-auto max-w-copy px-4 pt-8" aria-labelledby="week1">
+<section class="mx-auto max-w-copy px-4 pt-8" data-section="preview-days" aria-labelledby="week1">
   <div class="flex items-baseline justify-between gap-3">
-    <h2 id="week1" class="text-xl font-bold tracking-tight">Your seven days</h2>
-    <span class="text-xs font-semibold uppercase tracking-wider text-moss">Unlocked</span>
+    <h2 id="week1" class="band-heading">Your seven days</h2>
+    <span class="eyebrow eyebrow-moss eyebrow-chip">Unlocked</span>
   </div>
   <p class="mt-1.5 text-sm text-muted leading-relaxed">{{ plan.week_arc.arc }}</p>
 
@@ -124,8 +124,8 @@
 </section>
 
 {# ---------------- Metrics + fallback ---------------- #}
-<section class="mx-auto max-w-copy px-4 pt-9">
-  <h2 class="text-xl font-bold tracking-tight">What you track, and why</h2>
+<section data-section="preview-metrics" class="mx-auto max-w-copy px-4 pt-9">
+  <h2 class="band-heading">What you track, and why</h2>
   <table class="mt-4 w-full text-sm border-collapse">
     <thead>
       <tr class="text-left text-[11px] uppercase tracking-wider text-muted">
@@ -161,8 +161,8 @@
 {# ---------------- Weeks 2-4, locked ---------------- #}
 <section class="mx-auto max-w-copy px-4 pt-10" aria-labelledby="locked">
   <div class="flex items-baseline justify-between gap-3">
-    <h2 id="locked" class="text-xl font-bold tracking-tight">Weeks 2 to 4</h2>
-    <span class="text-xs font-semibold uppercase tracking-wider text-muted">Locked</span>
+    <h2 id="locked" class="band-heading">Weeks 2 to 4</h2>
+    <span class="eyebrow eyebrow-chip">Locked</span>
   </div>
   <p class="mt-1.5 text-sm text-muted leading-relaxed">
     These are written from your week 1 log, which is why they cannot be shown yet: week 2
@@ -181,37 +181,37 @@
     {% endfor %}
   </ol>
 
-  <div class="reveal surface-float mt-4 rounded-3xl bg-white p-5">
-    <h3 class="font-semibold text-sm uppercase tracking-wide text-muted">The trial adds</h3>
-    <ul class="mt-3 space-y-2 text-sm">
+  <div class="reveal surface-float mt-5 rounded-3xl bg-white p-6">
+    <h3 class="eyebrow-title">The trial adds</h3>
+    <ul class="mt-4 space-y-2.5 text-sm">
       {% for item in unlock_items %}
-        <li class="flex gap-2"><span class="text-ember shrink-0" aria-hidden="true">&#43;</span><span>{{ item }}</span></li>
+        <li class="flex gap-2.5"><span class="text-ember shrink-0" aria-hidden="true">&#43;</span><span>{{ item }}</span></li>
       {% endfor %}
     </ul>
   </div>
 </section>
 
 {# ---------------- The ask ---------------- #}
-<section class="mx-auto max-w-copy px-4 pt-10 pb-16" aria-labelledby="unlock">
-  <div class="panel bg-ink text-paper p-6 sm:p-7">
-    <h2 id="unlock" class="text-2xl font-bold tracking-tight">Week 1 was built from {{ total }} answers</h2>
-    <p class="mt-2 text-paper/85 leading-relaxed">
+<section data-section="preview-ask" class="mx-auto max-w-copy px-4 pt-10 pb-16" aria-labelledby="unlock">
+  <div class="band band-deep !py-8 sm:!py-10 text-center">
+    <h2 id="unlock" class="band-heading">Week 1 was built from {{ total }} answers</h2>
+    <p class="mt-4 text-lg text-muted leading-relaxed">
       Weeks 2 to 4, exports, and the weekly adjustments are {{ copy.trial_amount }} for
       {{ copy.trial_days }} days. If week 1 was not worth reading, you have lost nothing:
       it cost nothing and no card detail was asked for.
     </p>
 
-    <div class="mt-5 space-y-2 text-sm">
+    <div class="mt-6 space-y-2.5 text-sm text-left mx-auto max-w-md">
       {% for key, text in copy.disclosures.items() %}
-        <p class="flex gap-2"><span class="text-ember shrink-0 mt-0.5" aria-hidden="true">&#10003;</span><span>{{ text }}</span></p>
+        <p class="flex gap-2.5"><span class="text-moss shrink-0 mt-0.5" aria-hidden="true">&#10003;</span><span>{{ text }}</span></p>
       {% endfor %}
     </div>
 
     <a href="/checkout"
-       class="btn-primary mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl px-6 py-4 text-lg font-semibold">
+       class="btn-primary mt-7 inline-flex w-full sm:w-auto items-center justify-center gap-2 px-8 py-4 text-lg font-semibold">
       Unlock weeks 2 to 4 <span aria-hidden="true">&rarr;</span>
     </a>
-    <p class="mt-3 text-xs text-paper/70 text-center">
+    <p class="mt-3 text-xs text-muted">
       Or keep week 1 and do nothing. It is yours either way, and this page stays open.
     </p>
   </div>
@@ -223,4 +223,5 @@
     Nothing about your schedule, your equipment or your meal structure was invented.
   </p>
 </section>
+</div>
 {% endblock %}

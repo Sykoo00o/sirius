@@ -1,0 +1,769 @@
+{
+  "url": "https://simple.life/",
+  "title": "Simple: Weight Loss & Health Coaching",
+  "variables": {
+    "--font-sans": "ui-sans-serif,system-ui,sans-serif,\"Apple Color Emoji\",\"Segoe UI Emoji\",\"Segoe UI Symbol\",\"Noto Color Emoji\"",
+    "--font-mono": "ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace",
+    "--color-blue-700": "oklch(48.8% .243 264.376)",
+    "--color-gray-500": "oklch(55.1% .027 264.364)",
+    "--color-gray-600": "oklch(44.6% .03 256.802)",
+    "--color-gray-700": "oklch(37.3% .034 259.733)",
+    "--color-black": "#000",
+    "--color-white": "#fff",
+    "--spacing": ".25rem",
+    "--container-4xl": "56rem",
+    "--text-xs": ".75rem",
+    "--text-xs--line-height": "calc(1/.75)",
+    "--text-sm": ".875rem",
+    "--text-sm--line-height": "calc(1.25/.875)",
+    "--text-base": "1rem",
+    "--text-base--line-height": "1.5",
+    "--text-lg": "1.125rem",
+    "--text-lg--line-height": "calc(1.75/1.125)",
+    "--text-xl": "1.25rem",
+    "--text-xl--line-height": "calc(1.75/1.25)",
+    "--text-2xl": "1.5rem",
+    "--text-2xl--line-height": "calc(2/1.5)",
+    "--text-3xl": "1.875rem",
+    "--text-3xl--line-height": "1.2",
+    "--text-4xl": "2.25rem",
+    "--text-4xl--line-height": "calc(2.5/2.25)",
+    "--text-5xl": "3rem",
+    "--text-5xl--line-height": "1",
+    "--text-6xl": "3.75rem",
+    "--text-6xl--line-height": "1",
+    "--text-7xl": "4.5rem",
+    "--text-7xl--line-height": "1",
+    "--font-weight-light": "300",
+    "--font-weight-normal": "400",
+    "--font-weight-medium": "500",
+    "--font-weight-semibold": "600",
+    "--font-weight-bold": "700",
+    "--tracking-tight": "-.025em",
+    "--tracking-normal": "0em",
+    "--tracking-wide": ".025em",
+    "--leading-normal": "1.5",
+    "--radius-md": ".375rem",
+    "--radius-lg": ".5rem",
+    "--radius-xl": ".75rem",
+    "--radius-2xl": "1rem",
+    "--radius-3xl": "1.5rem",
+    "--ease-in": "cubic-bezier(.4,0,1,1)",
+    "--ease-in-out": "cubic-bezier(.4,0,.2,1)",
+    "--aspect-video": "16/9",
+    "--default-transition-duration": ".15s",
+    "--default-transition-timing-function": "cubic-bezier(.4,0,.2,1)",
+    "--default-font-family": "var(--font-sans)",
+    "--default-mono-font-family": "var(--font-mono)",
+    "--color-primary": "#323653",
+    "--color-secondary": "#32365399",
+    "--color-features-avo": "#8952ff",
+    "--color-fill-accent": "#7d8bf7",
+    "--color-section": "#f6d4ff33",
+    "--color-title-heading": "#8952ff1a",
+    "--color-title-heading-text-blinky": "#8560eb",
+    "--color-faq-title": "#1c2243",
+    "--color-faq-answer": "#707488",
+    "--color-faq-icon": "#f5f6f8",
+    "--color-confidence": "#5354ff",
+    "--color-tab-buttons-wrapper": "#32365314",
+    "--color-tab-buttons-wrapper-mobile": "#e2dde933",
+    "--color-tab1-title-heading": "#fff9",
+    "--color-footer": "#0c151ae6",
+    "--color-footer-content-right": "#fff6",
+    "--color-footer-content-link": "#c2b9ff",
+    "--background-image-tab-1": "linear-gradient(71deg,#dea5ff -11.18%,#4d23e4 85.56%),#f9f7ff",
+    "--background-image-tab-2": "linear-gradient(180deg,#eee5ffcc 51.88%,#c3a3ffcc 100%)",
+    "--background-image-blue-gradient": "linear-gradient(90deg,#d94ba5 -98.74%,#5651ff 44.42%,#00cbff 166.71%)",
+    "--background-image-social-gradient": "linear-gradient(99deg,#d94ba5 -82.62%,#5651ff -34.26%,#00cbff 108.29%)",
+    "--background-image-facebook-gradient": "linear-gradient(99deg,#d94ba5 -43.43%,#5651ff 39.81%,#00cbff 154.38%)",
+    "--background-image-text-gradient": "linear-gradient(90deg,#6b7df0 30.93%,#816bff 52.39%,#4fc0da 92.23%)",
+    "--background-image-tool": "linear-gradient(219deg,#c3a6ff -23.66%,#8c55ff 104.82%)",
+    "--color-calculator": "#f8f8ff",
+    "--color-button-primary": "#7d8bf7",
+    "--color-button-primary-hover": "#3d448b",
+    "--color-accent": "#5651ff",
+    "--color-success": "#5bda2f",
+    "--color-text-primary": "#020618",
+    "--color-text-dark": "#2f2f2f",
+    "--color-text-muted": "#62748e",
+    "--color-text-muted-light": "#999",
+    "--color-text-error": "#dc2626",
+    "--color-border-default": "#e2e8f0",
+    "--color-border-light": "#e6e6ff",
+    "--color-border-focus": "#5661c6",
+    "--color-border-error": "#ef4444",
+    "--color-bg-error": "#fef2f2",
+    "--color-hover": "#f5f5f5",
+    "--background-color": "#fff",
+    "--background-primary-color": "#fff",
+    "--primary-color": "#7d8bf7",
+    "--text-color-primary": "#323653",
+    "--border-primary-color": "#3236534d",
+    "--Stroke-Secondary": "#3236531a",
+    "--size-30": "1.875rem",
+    "--size-20": "1.25rem",
+    "--size-8": ".5rem"
+  },
+  "breakpoints": [
+    "1134px",
+    "1445px",
+    "40rem",
+    "48rem",
+    "64rem",
+    "80rem",
+    "96rem",
+    "1440px",
+    "1135px",
+    "1446px",
+    "768px",
+    "767px",
+    "1200px",
+    "1100px",
+    "1024px",
+    "426px",
+    "896px",
+    "600px",
+    "400px",
+    "550px",
+    "500px",
+    "425px",
+    "769px",
+    "897px",
+    "1023px",
+    "890px",
+    "1280px",
+    "530px"
+  ],
+  "unreadable": [],
+  "fonts": [
+    "Inter 300 normal",
+    "Inter 300 normal",
+    "Inter 400 normal",
+    "Inter 400 normal",
+    "Inter 500 normal",
+    "Inter 500 normal",
+    "Inter 600 normal",
+    "Inter 600 normal"
+  ],
+  "inlineSvg": 74,
+  "text": [
+    [
+      "rgb(50, 54, 83)",
+      33
+    ],
+    [
+      "rgb(255, 255, 255)",
+      29
+    ],
+    [
+      "rgba(50, 54, 83, 0.6)",
+      11
+    ],
+    [
+      "rgba(0, 0, 0, 0)",
+      10
+    ],
+    [
+      "rgb(28, 34, 67)",
+      5
+    ],
+    [
+      "rgb(112, 116, 136)",
+      5
+    ],
+    [
+      "rgb(0, 0, 0)",
+      4
+    ],
+    [
+      "rgb(194, 185, 255)",
+      4
+    ],
+    [
+      "rgb(137, 82, 255)",
+      3
+    ],
+    [
+      "rgb(83, 84, 255)",
+      2
+    ],
+    [
+      "rgba(255, 255, 255, 0.4)",
+      2
+    ],
+    [
+      "rgba(255, 255, 255, 0.6)",
+      1
+    ]
+  ],
+  "fill": [
+    [
+      "rgb(255, 255, 255)",
+      11
+    ],
+    [
+      "rgba(50, 54, 83, 0.08)",
+      11
+    ],
+    [
+      "rgba(246, 212, 255, 0.2)",
+      9
+    ],
+    [
+      "rgb(50, 54, 83)",
+      5
+    ],
+    [
+      "rgb(245, 246, 248)",
+      5
+    ],
+    [
+      "rgba(137, 82, 255, 0.1)",
+      3
+    ],
+    [
+      "oklab(0.999994 0.0000455677 0.0000200868 / 0.7)",
+      1
+    ],
+    [
+      "rgb(133, 96, 235)",
+      1
+    ],
+    [
+      "rgb(0, 0, 0)",
+      1
+    ],
+    [
+      "rgba(12, 21, 26, 0.9)",
+      1
+    ]
+  ],
+  "family": [
+    [
+      "Inter, sans-serif",
+      109
+    ]
+  ],
+  "type": [
+    [
+      "72px / 80px / 500",
+      17
+    ],
+    [
+      "24px / 32px / 400",
+      10
+    ],
+    [
+      "20px / 28px / 600",
+      8
+    ],
+    [
+      "20px / 24px / 600",
+      7
+    ],
+    [
+      "24px / 32px / 500",
+      7
+    ],
+    [
+      "28px / 32px / 600",
+      7
+    ],
+    [
+      "16px / 20px / 500",
+      7
+    ],
+    [
+      "28px / 28px / 400",
+      6
+    ],
+    [
+      "72px / 88px / 600",
+      5
+    ],
+    [
+      "28px / 32px / 400",
+      5
+    ],
+    [
+      "18px / 28px / 500",
+      4
+    ],
+    [
+      "20px / 24px / 400",
+      4
+    ],
+    [
+      "16px / 20px / 300",
+      4
+    ],
+    [
+      "16px / normal / 400",
+      4
+    ]
+  ],
+  "space": [
+    [
+      "8px",
+      39
+    ],
+    [
+      "16px",
+      33
+    ],
+    [
+      "12px",
+      29
+    ],
+    [
+      "24px",
+      24
+    ],
+    [
+      "20px",
+      22
+    ],
+    [
+      "32px",
+      13
+    ],
+    [
+      "4px",
+      13
+    ],
+    [
+      "40px",
+      13
+    ],
+    [
+      "28px",
+      13
+    ],
+    [
+      "9px",
+      10
+    ],
+    [
+      "80px",
+      9
+    ],
+    [
+      "48px",
+      6
+    ],
+    [
+      "152px",
+      5
+    ],
+    [
+      "36px",
+      5
+    ]
+  ],
+  "radius": [
+    [
+      "3.35544e+07px",
+      24
+    ],
+    [
+      "24px",
+      15
+    ],
+    [
+      "80px",
+      11
+    ],
+    [
+      "16px",
+      6
+    ],
+    [
+      "20px",
+      6
+    ],
+    [
+      "99px",
+      4
+    ],
+    [
+      "48px",
+      4
+    ],
+    [
+      "999px",
+      4
+    ],
+    [
+      "2px",
+      3
+    ],
+    [
+      "50px",
+      1
+    ],
+    [
+      "96px",
+      1
+    ]
+  ],
+  "shadow": [
+    [
+      "rgba(0, 0, 0, 0) 87px 339px 98px 0px, rgba(0, 0, 0, 0.01) 56px 217px 90px 0px, rgba(0, 0, 0, 0.05) 31px 122px 76px 0px, rgba(0, 0, 0, 0.09) 14px 54px 56px 0px, rgba(0, 0, 0, 0.1) 3px 14px 31px 0px",
+      5
+    ],
+    [
+      "rgba(165, 181, 202, 0) 0px 164px 46px 0px, rgba(165, 181, 202, 0.01) 0px 105px 42px 0px, rgba(165, 181, 202, 0.05) 0px 59px 35px 0px, rgba(165, 181, 202, 0.09) 0px 26px 26px 0px, rgba(165, 181, 202, 0.1) 0px 7px 14px 0px",
+      1
+    ],
+    [
+      "rgba(132, 74, 255, 0.25) 0px 4px 12px 0px, rgba(0, 0, 0, 0.1) 0px 2px 6px 0px, rgba(255, 255, 255, 0.4) 0px 0px 16px 0px inset",
+      1
+    ],
+    [
+      "rgba(20, 21, 26, 0.05) 0px 1px 2px 0px",
+      1
+    ]
+  ],
+  "maxWidth": [
+    [
+      "100%",
+      35
+    ],
+    [
+      "1440px",
+      2
+    ],
+    [
+      "1425.6px",
+      1
+    ],
+    [
+      "600px",
+      1
+    ],
+    [
+      "590px",
+      1
+    ],
+    [
+      "800px",
+      1
+    ],
+    [
+      "1120px",
+      1
+    ],
+    [
+      "640px",
+      1
+    ],
+    [
+      "1018px",
+      1
+    ],
+    [
+      "1280px",
+      1
+    ]
+  ],
+  "borderWidth": [],
+  "assets": [
+    {
+      "kind": "background",
+      "url": "https://simple.life/landing/homepage/images/fs-vector.png.webp"
+    },
+    {
+      "kind": "background",
+      "url": "https://simple.life/landing/homepage/images/blinky-hand.png.webp"
+    },
+    {
+      "kind": "img",
+      "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgZmlsbD0ibm9uZSI+CiAgICA8cmVjdCB4PSIwIiB5PSIwIiB3aWR0aD0iMTAiIGhlaWdodD0iMTAiIGZpbGw9IiNmZjAwMDAiIGZpbGwtb3BhY2l0eT0iMCIgLz4KICAgIDxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMCIgZmlsbD0iI2ZmMDAwMCIgZmlsbC1vcGFjaXR5PSIwIiAvPgogICAgPHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjEwIiBoZWlnaHQ9IjEwIiBmaWxsPSIjZmYwMDAwIiBmaWxsLW9wYWNpdHk9IjAiIC8+CiAgICA8cmVjdCB4PSIwIiB5PSIwIiB3aWR0aD0iMTAiIGhlaWdodD0iMTAiIGZpbGw9IiNmZjAwMDAiIGZpbGwtb3BhY2l0eT0iMCIgLz4KICAgIDxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMCIgZmlsbD0iI2ZmMDAwMCIgZmlsbC1vcGFjaXR5PSIwIiAvPgogICAgPHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjEwIiBoZWlnaHQ9IjEwIiBmaWxsPSIjZmYwMDAwIiBmaWxsLW9wYWNpdHk9IjAiIC8+CiAgICA8cmVjdCB4PSIwIiB5PSIwIiB3aWR0aD0iMTAiIGhlaWdodD0iMTAiIGZpbGw9IiNmZjAwMDAiIGZpbGwtb3BhY2l0eT0iMCIgLz4KICAgIDxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMCIgZmlsbD0iI2ZmMDAwMCIgZmlsbC1vcGFjaXR5PSIwIiAvPgogICAgPHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjEwIiBoZWlnaHQ9IjEwIiBmaWxsPSIjZmYwMDAwIiBmaWxsLW9wYWNpdHk9IjAiIC8+CiAgICA8cmVjdCB4PSIwIiB5PSIwIiB3aWR0aD0iMTAiIGhlaWdodD0iMTAiIGZpbGw9IiNmZjAwMDAiIGZpbGwtb3BhY2l0eT0iMCIgLz4KICAgIDxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMCIgZmlsbD0iI2ZmMDAwMCIgZmlsbC1vcGFjaXR5PSIwIiAvPgogICAgPHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjEwIiBoZWlnaHQ9IjEwIiBmaWxsPSIjZmYwMDAwIiBmaWxsLW9wYWNpdHk9IjAiIC8+CiAgICA8cmVjdCB4PSIwIiB5PSIwIiB3aWR0aD0iMTAiIGhlaWdodD0iMTAiIGZpbGw9IiNmZjAwMDAiIGZpbGwtb3BhY2l0eT0iMCIgLz4KICAgIDxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMCIgZmlsbD0iI2ZmMDAwMCIgZmlsbC1vcGFjaXR5PSIwIiAvPgogICAgPHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjEwIiBoZWlnaHQ9IjEwIiBmaWxsPSIjZmYwMDAwIiBmaWxsLW9wYWNpdHk9IjAiIC8+CiAgICA8cmVjdCB4PSIwIiB5PSIwIiB3aWR0aD0iMTAiIGhlaWdodD0iMTAiIGZpbGw9IiNmZjAwMDAiIGZpbGwtb3BhY2l0eT0iMCIgLz4KICAgIDxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMCIgZmlsbD0iI2ZmMDAwMCIgZmlsbC1vcGFjaXR5PSIwIiAvPgogICAgPHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjEwIiBoZWlnaHQ9IjEwIiBmaWxsPSIjZmYwMDAwIiBmaWxsLW9wYWNpdHk9IjAiIC8+CiAgICA8cmVjdCB4PSIwIiB5PSIwIiB3aWR0aD0iMTAiIGhlaWdodD0iMTAiIGZpbGw9IiNmZjAwMDAiIGZpbGwtb3BhY2l0eT0iMCIgLz4KICAgIDxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMCIgZmlsbD0iI2ZmMDAwMCIgZmlsbC1vcGFjaXR5PSIwIiAvPgogICAgPHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjEwIiBoZWlnaHQ9IjEwIiBmaWxsPSIjZmYwMDAwIiBmaWxsLW9wYWNpdHk9IjAiIC8+CiAgICA8cmVjdCB4PSIwIiB5PSIwIiB3aWR0aD0iMTAiIGhlaWdodD0iMTAiIGZpbGw9IiNmZjAwMDAiIGZpbGwtb3BhY2l0eT0iMCIgLz4KICAgIDxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMCIgZmlsbD0iI2ZmMDAwMCIgZmlsbC1vcGFjaXR5PSIwIiAvPgogICAgPHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjEwIiBoZWlnaHQ9IjEwIiBmaWxsPSIjZmYwMDAwIiBmaWxsLW9wYWNpdHk9IjAiIC8+CiAgICA8cmVjdCB4PSIwIiB5PSIwIiB3aWR0aD0iMTAiIGhlaWdodD0iMTAiIGZpbGw9IiNmZjAwMDAiIGZpbGwtb3BhY2l0eT0iMCIgLz4KICAgIDxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMCIgZmlsbD0iI2ZmMDAwMCIgZmlsbC1vcGFjaXR5PSIwIiAvPgogICAgPHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjEwIiBoZWlnaHQ9IjEwIiBmaWxsPSIjZmYwMDAwIiBmaWxsLW9wYWNpdHk9IjAiIC8+CiAgICA8cmVjdCB4PSIwIiB5PSIwIiB3aWR0aD0iMTAiIGhlaWdodD0iMTAiIGZpbGw9IiNmZjAwMDAiIGZpbGwtb3BhY2l0eT0iMCIgLz4KICAgIDxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMCIgZmlsbD0iI2ZmMDAwMCIgZmlsbC1vcGFjaXR5PSIwIiAvPgogICAgPHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjEwIiBoZWlnaHQ9IjEwIiBmaWxsPSIjZmYwMDAwIiBmaWxsLW9wYWNpdHk9IjAiIC8+CiAgICA8cmVjdCB4PSIwIiB5PSIwIiB3aWR0aD0iMTAiIGhlaWdodD0iMTAiIGZpbGw9IiNmZjAwMDAiIGZpbGwtb3BhY2l0eT0iMCIgLz4KICAgIDxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMCIgZmlsbD0iI2ZmMDAwMCIgZmlsbC1vcGFjaXR5PSIwIiAvPgogICAgPHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjEwIiBoZWlnaHQ9IjEwIiBmaWxsPSIjZmYwMDAwIiBmaWxsLW9wYWNpdHk9IjAiIC8+CiAgICA8cmVjdCB4PSIwIiB5PSIwIiB3aWR0aD0iMTAiIGhlaWdodD0iMTAiIGZpbGw9IiNmZjAwMDAiIGZpbGwtb3BhY2l0eT0iMCIgLz4KICAgIDxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMCIgZmlsbD0iI2ZmMDAwMCIgZmlsbC1vcGFjaXR5PSIwIiAvPgogICAgPHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjEwIiBoZWlnaHQ9IjEwIiBmaWxsPSIjZmYwMDAwIiBmaWxsLW9wYWNpdHk9IjAiIC8+Cjwvc3ZnPg==",
+      "alt": "",
+      "natural": "24x24",
+      "shown": "1426x810"
+    },
+    {
+      "kind": "img",
+      "url": "https://simple.life/landing/homepage/images/en/21m.png.webp",
+      "alt": "Downloads",
+      "natural": "747x747",
+      "shown": "373x373"
+    },
+    {
+      "kind": "img",
+      "url": "https://simple.life/landing/homepage/images/en/18m.png.webp",
+      "alt": "Pounds lost",
+      "natural": "747x747",
+      "shown": "373x373"
+    },
+    {
+      "kind": "img",
+      "url": "https://simple.life/landing/homepage/images/en/47.png.webp",
+      "alt": "Average rating",
+      "natural": "748x747",
+      "shown": "373x373"
+    },
+    {
+      "kind": "img",
+      "url": "https://simple.life/landing/homepage/images/forbes-b.png",
+      "alt": "Forbes",
+      "natural": "183x50",
+      "shown": "92x25"
+    },
+    {
+      "kind": "img",
+      "url": "https://simple.life/landing/homepage/images/glamour-b.png",
+      "alt": "Glamour",
+      "natural": "221x50",
+      "shown": "111x25"
+    },
+    {
+      "kind": "img",
+      "url": "https://simple.life/landing/homepage/images/mens-health-b.png",
+      "alt": "MensHealth",
+      "natural": "230x52",
+      "shown": "111x25"
+    },
+    {
+      "kind": "img",
+      "url": "https://simple.life/landing/homepage/images/fortune-b.png",
+      "alt": "Fortune",
+      "natural": "207x49",
+      "shown": "101x24"
+    },
+    {
+      "kind": "img",
+      "url": "https://simple.life/landing/homepage/images/mnt-b.png",
+      "alt": "MNT",
+      "natural": "179x102",
+      "shown": "89x51"
+    },
+    {
+      "kind": "img",
+      "url": "https://simple.life/landing/homepage/images/yahoo-b.png",
+      "alt": "Yahoo Life",
+      "natural": "290x83",
+      "shown": "142x41"
+    },
+    {
+      "kind": "img",
+      "url": "https://simple.life/landing/homepage/images/martha-b.png",
+      "alt": "Martha Stewart",
+      "natural": "230x101",
+      "shown": "114x50"
+    },
+    {
+      "kind": "img",
+      "url": "https://simple.life/landing/homepage/images/avo-tab2.png.webp",
+      "alt": "Avo",
+      "natural": "1392x683",
+      "shown": "0x0"
+    },
+    {
+      "kind": "img",
+      "url": "https://simple.life/landing/homepage/images/en/Feature1.png",
+      "alt": "Personalized weight loss plan",
+      "natural": "629x889",
+      "shown": "315x445"
+    },
+    {
+      "kind": "img",
+      "url": "https://simple.life/landing/homepage/images/en/Feature2.png",
+      "alt": "Food scanner and smart feedback",
+      "natural": "628x889",
+      "shown": "315x446"
+    },
+    {
+      "kind": "img",
+      "url": "https://simple.life/landing/homepage/images/en/Feature3.png",
+      "alt": "Pilates, yoga, and walking plans",
+      "natural": "628x889",
+      "shown": "315x446"
+    },
+    {
+      "kind": "img",
+      "url": "https://simple.life/landing/homepage/images/testimonials/teresa-avatar.jpg.webp",
+      "alt": "Teresa",
+      "natural": "150x150",
+      "shown": "48x48"
+    },
+    {
+      "kind": "img",
+      "url": "https://simple.life/landing/homepage/images/testimonials/teresa.jpg.webp",
+      "alt": "Teresa",
+      "natural": "608x1081",
+      "shown": "342x608"
+    },
+    {
+      "kind": "img",
+      "url": "https://simple.life/landing/homepage/images/testimonials/lori-avatar.jpg.webp",
+      "alt": "Lori",
+      "natural": "150x150",
+      "shown": "48x48"
+    },
+    {
+      "kind": "img",
+      "url": "https://simple.life/landing/homepage/images/testimonials/lori.jpg.webp",
+      "alt": "Lori",
+      "natural": "608x1081",
+      "shown": "342x608"
+    },
+    {
+      "kind": "img",
+      "url": "https://simple.life/landing/homepage/images/testimonials/james-avatar.jpg.webp",
+      "alt": "James",
+      "natural": "150x150",
+      "shown": "48x48"
+    },
+    {
+      "kind": "img",
+      "url": "https://simple.life/landing/homepage/images/testimonials/james.jpg.webp",
+      "alt": "James",
+      "natural": "608x1081",
+      "shown": "342x608"
+    },
+    {
+      "kind": "img",
+      "url": "https://simple.life/landing/homepage/images/testimonials/joelle-avatar.jpg.webp",
+      "alt": "Joelle",
+      "natural": "150x150",
+      "shown": "48x48"
+    },
+    {
+      "kind": "img",
+      "url": "https://simple.life/landing/homepage/images/testimonials/joelle.jpg.webp",
+      "alt": "Joelle",
+      "natural": "608x1081",
+      "shown": "342x608"
+    },
+    {
+      "kind": "img",
+      "url": "https://simple.life/landing/homepage/images/testimonials/debi-avatar.jpg.webp",
+      "alt": "Debi",
+      "natural": "150x150",
+      "shown": "48x48"
+    },
+    {
+      "kind": "img",
+      "url": "https://simple.life/landing/homepage/images/testimonials/debi.jpg.webp",
+      "alt": "Debi",
+      "natural": "608x1081",
+      "shown": "342x608"
+    },
+    {
+      "kind": "img",
+      "url": "https://dev-martech-content.cdn-simple-life.com/blog-cms/share/one-million-subscribers/one-million-subscribers-cover1.png",
+      "alt": "One million subscribers. One million health goals.",
+      "natural": "1000x526",
+      "shown": "419x235"
+    },
+    {
+      "kind": "img",
+      "url": "https://dev-martech-content.cdn-simple-life.com/blog-cms/share/blog-best-time-to-eat-intermittent-fasting/ai-share-1788181473826.png",
+      "alt": "When should you eat? New research reveals the best timing for fasting",
+      "natural": "1200x630",
+      "shown": "419x236"
+    },
+    {
+      "kind": "img",
+      "url": "https://dev-martech-content.cdn-simple-life.com/blog-cms/share/menopause-weight-loss/ai-share-1783097186717.png",
+      "alt": "Menopause weight loss strategies that actually work",
+      "natural": "1200x630",
+      "shown": "419x236"
+    },
+    {
+      "kind": "img",
+      "url": "https://simple.life/landing/homepage/images/logo-footer.svg",
+      "alt": "Simple",
+      "natural": "131x32",
+      "shown": "131x32"
+    },
+    {
+      "kind": "img",
+      "url": "https://bat.bing.com/action/0?ti=187009553&Ver=2&mid=8c60aee3-5450-4697-a68b-1f133279ab80&bo=1&sid=7f71e1c0e46c11f18dd6ad9edfaac810&vid=7f71c800e46c11f1ad2b69cda52c599c&vids=1&msclkid=N&pi=0&lg=en-US&sw=1440&sh=900&sc=24&nwd=1&tl=Simple%3A%20Weight%20Loss%20%26%20Health%20Coaching&p=https%3A%2F%2Fsimple.life%2F&r=&lt=1246&evt=pageLoad&sv=2&cdb=AQAC&rn=864997",
+      "alt": "",
+      "natural": "0x0",
+      "shown": "0x0"
+    },
+    {
+      "kind": "img",
+      "url": "https://bat.bing.com/action/0?ti=187009553&Ver=2&mid=f9600634-3313-47aa-93cd-5392cb230e57&bo=1&sid=7f71e1c0e46c11f18dd6ad9edfaac810&vid=7f71c800e46c11f1ad2b69cda52c599c&vids=0&msclkid=N&pi=0&lg=en-US&sw=1440&sh=900&sc=24&nwd=1&tl=Simple%3A%20Weight%20Loss%20%26%20Health%20Coaching&p=https%3A%2F%2Fsimple.life%2F&r=&lt=1246&evt=pageLoad&sv=2&cdb=AQET&rn=6908",
+      "alt": "",
+      "natural": "0x0",
+      "shown": "0x0"
+    },
+    {
+      "kind": "video",
+      "url": "https://simple.life/landing/homepage/videos/en/blinky.mp4",
+      "poster": "https://simple.life/landing/homepage/images/fs-video.png.webp"
+    },
+    {
+      "kind": "video",
+      "url": "https://simple.life/landing/homepage/videos/blinky-tab-b.mp4",
+      "poster": ""
+    },
+    {
+      "kind": "video",
+      "url": "https://simple.life/landing/homepage/videos/en/landing-video.mp4",
+      "poster": "https://simple.life/landing/homepage/images/video-poster.png.webp"
+    },
+    {
+      "kind": "video",
+      "url": "https://simple.life/landing/homepage/videos/en/landing-video.mp4",
+      "poster": ""
+    },
+    {
+      "kind": "video",
+      "url": "https://player.vimeo.com/progressive_redirect/playback/935118854/rendition/540p/file.mp4?loc=external&signature=acfb7cc48b2888db5237ec07fa7728e368410e0d9b7ffd34e5ed2f0cc4b49eb5",
+      "poster": "https://simple.life/landing/homepage/images/testimonials/teresa.jpg.webp"
+    },
+    {
+      "kind": "video",
+      "url": "https://player.vimeo.com/progressive_redirect/playback/935118838/rendition/540p/file.mp4?loc=external&signature=dbcbc5bbfc43164f7080dc17d840c294f1b5494ff449994d7549aceea647a8bd",
+      "poster": "https://simple.life/landing/homepage/images/testimonials/lori.jpg.webp"
+    },
+    {
+      "kind": "video",
+      "url": "https://player.vimeo.com/progressive_redirect/playback/935118782/rendition/540p/file.mp4?loc=external&signature=c9888f88c28640c01de9a178ca99602c5dbc6be3d49af1864b6e00c8b3555b8f",
+      "poster": "https://simple.life/landing/homepage/images/testimonials/james.jpg.webp"
+    },
+    {
+      "kind": "video",
+      "url": "https://player.vimeo.com/progressive_redirect/playback/935118815/rendition/540p/file.mp4?loc=external&signature=2e7969533593f732d0001d658685f56163614bdd417bc5ec10d4fb792c0ca9d0",
+      "poster": "https://simple.life/landing/homepage/images/testimonials/joelle.jpg.webp"
+    },
+    {
+      "kind": "video",
+      "url": "https://player.vimeo.com/progressive_redirect/playback/935118666/rendition/540p/file.mp4?loc=external&signature=d597aead638eb70f7f670665dbe4b33a53e889ccf544c5a1351deb5fe655eb78",
+      "poster": "https://simple.life/landing/homepage/images/testimonials/debi.jpg.webp"
+    },
+    {
+      "kind": "video",
+      "url": "https://simple.life/landing/homepage/videos/blinky-five-n.mp4",
+      "poster": ""
+    },
+    {
+      "kind": "video",
+      "url": "https://simple.life/landing/homepage/videos/blinky-three.mp4",
+      "poster": "https://simple.life/landing/homepage/images/blinky-three.png"
+    },
+    {
+      "kind": "icon",
+      "url": "https://simple.life/favicon.ico"
+    },
+    {
+      "kind": "icon",
+      "url": "https://simple.life/favicon.svg"
+    },
+    {
+      "kind": "icon",
+      "url": "https://simple.life/favicon-48x48.png"
+    },
+    {
+      "kind": "icon",
+      "url": "https://simple.life/favicon-96x96.png"
+    }
+  ]
+}

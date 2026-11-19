@@ -28,6 +28,18 @@ backend/_sqlcheck.py
 backend/_probe.py
 backend/*.db
 
+# --- funnel design capture ----------------------------------------------------
+# Screenshots are regenerable with `node capture/shots.js` / `walk_visual.js` and there is no
+# lane in which they are diffed (the simple.life pass is a *reference* build, so there is no
+# pixel target to regress against), which makes 22MB of them poor repository material. The
+# measurements they were taken from stay tracked: `capture/*.json`, `capture/**/boxes-*.json`
+# and `capture/plan.md` are the pattern brief, and the geometry tables in it are the thing a
+# later change is checked against.
+#
+# It also keeps the reference's own artwork (their brand, their photography) out of the tree,
+# which is the rights posture a reference build is supposed to leave behind.
+funnel_app/capture/**/*.png
+
 # --- containers / editors / OS ----------------------------------------------
 .docker/
 node_modules/

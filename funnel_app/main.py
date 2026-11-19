@@ -340,7 +340,13 @@ async def summary(request: Request) -> HTMLResponse:
 
     return templates.TemplateResponse(
         request, "summary.html",
+        # `progress=100` was already being passed here and going unused, because the summary
+        # did not include the bar. It does now, and the number is derived from the four section
+        # labels the partial draws its dots from rather than hardcoded next to the bar.
         page_context(request, rows=rows, profile=profile, progress=100,
+                     sections=[(key, SECTION_TITLES[key]) for key in SECTION_KEYS],
+                     section_title="All questions answered",
+                     section_index=len(SECTION_KEYS) - 1,
                      total=len(QUESTIONS), plan=build_plan(profile)),
     )
 

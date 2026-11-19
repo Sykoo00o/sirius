@@ -1,0 +1,34 @@
+{
+  "header": {
+    "top": 0,
+    "height": 56
+  },
+  "hero": {
+    "top": 72,
+    "height": 980
+  },
+  "proof": {
+    "top": 1068,
+    "height": 483
+  },
+  "how": {
+    "top": 1567,
+    "height": 600
+  },
+  "artefact": {
+    "top": 2182,
+    "height": 729
+  },
+  "trust": {
+    "top": 2927,
+    "height": 601
+  },
+  "close": {
+    "top": 3544,
+    "height": 438
+  },
+  "footer": {
+    "top": 4045,
+    "height": 221
+  }
+}

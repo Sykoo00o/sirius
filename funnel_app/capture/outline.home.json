@@ -1,0 +1,128 @@
+[
+  {
+    "selector": "#html-root",
+    "top": 0,
+    "height": 12088,
+    "depth": 0,
+    "heading": "Simplify the way you lose weight"
+  },
+  {
+    "selector": "section.first-section.bg-section",
+    "top": 83,
+    "height": 1692,
+    "depth": 0,
+    "heading": "Simplify the way you lose weight"
+  },
+  {
+    "selector": "h2.text-primary.mb-6",
+    "top": 243,
+    "height": 160,
+    "depth": 0,
+    "heading": "Simplify the way you lose weight"
+  },
+  {
+    "selector": "div.blinky-video.mt-7",
+    "top": 667,
+    "height": 884,
+    "depth": 0,
+    "heading": ""
+  },
+  {
+    "selector": "section.bg-section.pb:18",
+    "top": 1799,
+    "height": 1392,
+    "depth": 0,
+    "heading": "Trusted by millions"
+  },
+  {
+    "selector": "div.trusted.relative",
+    "top": 2103,
+    "height": 373,
+    "depth": 0,
+    "heading": "Downloads"
+  },
+  {
+    "selector": "video.section-video.absolute",
+    "top": 3208,
+    "height": 1283,
+    "depth": 0,
+    "heading": ""
+  },
+  {
+    "selector": "#features",
+    "top": 4509,
+    "height": 1260,
+    "depth": 0,
+    "heading": "All-in-one app"
+  },
+  {
+    "selector": "div.tool.fade-in-section",
+    "top": 4997,
+    "height": 612,
+    "depth": 0,
+    "heading": "Personalized weight loss plan"
+  },
+  {
+    "selector": "#mainVideo",
+    "top": 5789,
+    "height": 791,
+    "depth": 0,
+    "heading": ""
+  },
+  {
+    "selector": "section.bg-section.pb:18",
+    "top": 6600,
+    "height": 924,
+    "depth": 0,
+    "heading": "Teresa"
+  },
+  {
+    "selector": "#Teresa-poster",
+    "top": 6760,
+    "height": 608,
+    "depth": 0,
+    "heading": ""
+  },
+  {
+    "selector": "#faq",
+    "top": 7548,
+    "height": 1275,
+    "depth": 0,
+    "heading": "FAQ"
+  },
+  {
+    "selector": "section.bg-section.pb:18",
+    "top": 8846,
+    "height": 744,
+    "depth": 0,
+    "heading": "Find confidence with Coach Avo™ and Blinky — your smart helpers with h"
+  },
+  {
+    "selector": "section.bg-section.pb:18",
+    "top": 9614,
+    "height": 964,
+    "depth": 0,
+    "heading": "Want simple health tips? Head to our blog."
+  },
+  {
+    "selector": "article.latest-blog-item.flex",
+    "top": 9982,
+    "height": 436,
+    "depth": 0,
+    "heading": "One million subscribers. One million health goals."
+  },
+  {
+    "selector": "section.bg-section.pb:18",
+    "top": 10602,
+    "height": 576,
+    "depth": 0,
+    "heading": "Read our educational Blog , join our Facebook community, and follow us"
+  },
+  {
+    "selector": "#contacts",
+    "top": 11226,
+    "height": 862,
+    "depth": 0,
+    "heading": "Contacts"
+  }
+]

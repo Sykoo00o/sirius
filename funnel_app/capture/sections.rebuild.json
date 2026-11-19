@@ -1,0 +1,10 @@
+{
+  "header": "[data-section=header]",
+  "hero": "[data-section=hero]",
+  "proof": "[data-section=proof]",
+  "how": "[data-section=how]",
+  "artefact": "[data-section=artefact]",
+  "trust": "[data-section=trust]",
+  "close": "[data-section=close]",
+  "footer": "[data-section=footer]"
+}

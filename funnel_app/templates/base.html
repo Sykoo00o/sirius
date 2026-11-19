@@ -14,7 +14,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}{{ brand }}{% endblock %}</title>
 <meta name="description" content="{{ copy.hero_sub | striptags | truncate(155, true) }}">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23e8590c'/><path d='M28 68 L50 30 L72 68' stroke='white' stroke-width='10' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23cf4a07'/><path d='M28 68 L50 30 L72 68' stroke='white' stroke-width='10' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
 {# Set before first paint, so `.reveal` elements are hidden only when the script that will
    reveal them is known to run. Without this class nothing is ever hidden (app.css). #}
 <script>document.documentElement.classList.add('js');</script>
@@ -34,7 +34,13 @@
           line:   '#e7ded0',
           ink:    '#2b2622',
           muted:  '#6f665c',
-          ember:  { DEFAULT: '#e8590c', dark: '#c74a08', soft: '#fff1e8' },
+          /* ember.DEFAULT is the value a CTA label sits on: #cf4a07 puts white text at 4.53:1,
+             which is AA at body size. The brighter #e8590c it replaces measured 3.58:1, legal
+             only above 24px, and this funnel's CTA labels appear at 16px in the quiz and the
+             summary. ember.dark is small text on a tint, and #bf4708 clears 4.6:1 there where
+             #c74a08 measured 4.31:1. Neither is a taste change: both were picked off the
+             contrast arithmetic, so a future tweak should re-run the check rather than guess. */
+          ember:  { DEFAULT: '#cf4a07', dark: '#bf4708', soft: '#fff1e8' },
           moss:   { DEFAULT: '#4a7c59', soft: '#eef4ef' },
         },
         fontFamily: {
@@ -50,19 +56,25 @@
   body { background: #fdfbf7; color: #2b2622; -webkit-font-smoothing: antialiased; }
   /* Focus rings kept visible: a funnel that hides focus on a keyboard is a funnel
      nobody can leave. */
-  :focus-visible { outline: 3px solid #e8590c; outline-offset: 2px; border-radius: 6px; }
-  .option-card:has(input:checked) { border-color: #e8590c; background: #fff1e8; box-shadow: 0 1px 0 #f3c9ae; }
-  .option-card input:focus-visible + span { outline: none; }
+  :focus-visible { outline: 3px solid #cf4a07; outline-offset: 2px; border-radius: 6px; }
+  /* Option rows are styled as a unit in app.css (`.option`), where the resting/hover/selected
+     progression lives next to the timing that animates it. */
+  .option input { accent-color: #cf4a07; }
   details > summary { list-style: none; cursor: pointer; }
   details > summary::-webkit-details-marker { display: none; }
-  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+  {# `app.css` owns the motion policy under `reduce`. It cannot be a blanket
+     `* { animation: none; transition: none }` here, because that selector also cancels the
+     one-shot entrance reveals, and a cancelled entrance leaves a `.reveal` element parked at
+     `opacity: 0` forever unless every other path also forces it visible. Blanket-killing
+     state transitions (a selected option taking 150ms) is fine and correct; killing them by
+     accident while trying to kill decoration is the failure mode. #}
 </style>
 </head>
 <body class="min-h-screen flex flex-col font-sans antialiased">
 
 <a href="#main" class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:bg-ember focus:text-white focus:px-3 focus:py-2 focus:rounded-lg">Skip to content</a>
 
-<header class="bg-paper/75 backdrop-blur-md shadow-[0_1px_0_rgba(43,38,34,0.06)] sticky top-0 z-30">
+<header data-section="header" class="bg-paper/75 backdrop-blur-md shadow-[0_1px_0_rgba(43,38,34,0.06)] sticky top-0 z-30">
   <div class="mx-auto max-w-5xl px-4 h-14 flex items-center justify-between">
     <a href="/" class="flex items-center gap-2 font-semibold tracking-tight">
       <span class="w-6 h-6 rounded-md bg-ember grid place-items-center text-white text-xs font-bold" aria-hidden="true">R</span>
@@ -74,7 +86,7 @@
 
 <main id="main" class="flex-1">{% block main %}{% endblock %}</main>
 
-<footer class="mt-16 border-t border-line bg-cream">
+<footer data-section="footer" class="mt-16 border-t border-line bg-cream">
   <div class="mx-auto max-w-5xl px-4 py-8 text-sm text-muted space-y-3">
     <p class="font-medium text-ink">{{ brand }} &middot; routine structure and meal organisation</p>
     <p>Routine structure and meal organisation only. Not medical advice, not a diagnosis, and no body-composition promise. See the terms page.</p>

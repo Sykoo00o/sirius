@@ -1,0 +1,166 @@
+{
+  "url": "https://simple.life/survey/main/ob/age",
+  "capturedAt": "2026-11-19T22:59:53.545Z",
+  "steps": [
+    {
+      "path": "/survey/main/ob/age",
+      "question": "We use cookies to analyze our website traffic and personalize your experience with us (the digital kind, not the delicious baked goods 🍪). OK",
+      "shell": {
+        "viewport": {
+          "w": 390,
+          "h": 844
+        },
+        "page": {
+          "bg": "rgb(245, 246, 248)",
+          "padding": "0px"
+        },
+        "progress": null,
+        "back": null,
+        "title": {
+          "selector": ".otFlat",
+          "width": 0,
+          "height": 0,
+          "top": 0,
+          "bg": "rgb(255, 255, 255)",
+          "color": "rgb(50, 54, 83)",
+          "radius": "0px",
+          "fontSize": "16px",
+          "fontWeight": "400",
+          "lineHeight": "24px",
+          "textAlign": "left",
+          "padding": "0px 0px 0px 0px",
+          "position": "fixed",
+          "text": "We use cookies to analyze our website traffic and personaliz",
+          "inlineStyle": "display: none;\n                    transition: visibility 0s 400ms, opacity 400ms linear;\n                    opacity: 0;visibility: hidden;"
+        },
+        "group": {
+          "gap": "8px",
+          "padding": "0px 0px",
+          "display": "flex",
+          "width": 350
+        },
+        "scrollHeight": 844
+      },
+      "resting": {
+        "width": 350,
+        "height": 96,
+        "top": 148,
+        "color": "rgb(50, 54, 83)",
+        "backgroundColor": "rgb(255, 255, 255)",
+        "backgroundImage": "none",
+        "borderTopWidth": "0px",
+        "borderTopStyle": "solid",
+        "borderTopColor": "rgba(0, 0, 0, 0)",
+        "borderRadius": "16px",
+        "boxShadow": "none",
+        "transform": "matrix(1, 0, 0, 1, 0, 0)",
+        "opacity": "1",
+        "paddingTop": "0px",
+        "paddingLeft": "0px",
+        "fontSize": "16px",
+        "lineHeight": "24px",
+        "fontWeight": "400",
+        "textAlign": "left",
+        "transitionProperty": "background, border-color",
+        "transitionDuration": "0.15s, 0.15s",
+        "transitionTimingFunction": "ease, ease",
+        "rowGap": "16px",
+        "gap": "16px",
+        "label": {
+          "text": "18–39",
+          "fontSize": "16px",
+          "lineHeight": "20px",
+          "fontWeight": "600",
+          "color": "rgb(50, 54, 83)"
+        },
+        "icon": {
+          "width": 96,
+          "height": 96,
+          "radius": "0px",
+          "bg": "rgba(0, 0, 0, 0)",
+          "tag": "img"
+        }
+      },
+      "hover": {
+        "width": 350,
+        "height": 96,
+        "top": 252,
+        "color": "rgb(50, 54, 83)",
+        "backgroundColor": "rgb(237, 239, 252)",
+        "backgroundImage": "none",
+        "borderTopWidth": "0px",
+        "borderTopStyle": "solid",
+        "borderTopColor": "rgba(0, 0, 0, 0)",
+        "borderRadius": "16px",
+        "boxShadow": "none",
+        "transform": "matrix(1, 0, 0, 1, 0, 0)",
+        "opacity": "1",
+        "paddingTop": "0px",
+        "paddingLeft": "0px",
+        "fontSize": "16px",
+        "lineHeight": "24px",
+        "fontWeight": "400",
+        "textAlign": "left",
+        "transitionProperty": "background, border-color",
+        "transitionDuration": "0.15s, 0.15s",
+        "transitionTimingFunction": "ease, ease",
+        "rowGap": "16px",
+        "gap": "16px",
+        "label": {
+          "text": "40–49",
+          "fontSize": "16px",
+          "lineHeight": "20px",
+          "fontWeight": "600",
+          "color": "rgb(50, 54, 83)"
+        },
+        "icon": {
+          "width": 96,
+          "height": 96,
+          "radius": "0px",
+          "bg": "rgba(0, 0, 0, 0)",
+          "tag": "img"
+        }
+      },
+      "selected": {
+        "width": 350,
+        "height": 96,
+        "top": 148,
+        "color": "rgb(50, 54, 83)",
+        "backgroundColor": "rgb(237, 239, 252)",
+        "backgroundImage": "none",
+        "borderTopWidth": "0px",
+        "borderTopStyle": "solid",
+        "borderTopColor": "rgb(125, 139, 247)",
+        "borderRadius": "16px",
+        "boxShadow": "none",
+        "transform": "matrix(1, 0, 0, 1, 0, 0)",
+        "opacity": "1",
+        "paddingTop": "0px",
+        "paddingLeft": "0px",
+        "fontSize": "16px",
+        "lineHeight": "24px",
+        "fontWeight": "400",
+        "textAlign": "left",
+        "transitionProperty": "background, border-color",
+        "transitionDuration": "0.15s, 0.15s",
+        "transitionTimingFunction": "ease, ease",
+        "rowGap": "16px",
+        "gap": "16px",
+        "label": {
+          "text": "18–39",
+          "fontSize": "16px",
+          "lineHeight": "20px",
+          "fontWeight": "600",
+          "color": "rgb(50, 54, 83)"
+        },
+        "icon": {
+          "width": 96,
+          "height": 96,
+          "radius": "0px",
+          "bg": "rgba(0, 0, 0, 0)",
+          "tag": "img"
+        }
+      }
+    }
+  ]
+}

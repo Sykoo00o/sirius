@@ -10,47 +10,56 @@
   headline is the baseline and stays boring on purpose.
 #}
 {#
-  Hero as one rounded panel inset from the page edge, with two blurred glow shapes behind
-  it. Pure CSS and `aria-hidden`: decoration carries no information.
+  Landing page, laid out on the pattern captured in `capture/plan.md`: one tinted rounded
+  band per argument, inset from the viewport edge, with 56/96px of interior air, a centred
+  display headline at tight negative tracking, pill eyebrows, and pill CTAs.
 
-  The three tiles are the old pill badge's three phrases, word for word, given more room.
+  Order follows the reference where we have something to put there (hero, proof, what-you-get,
+  how-it-works, close) and drops the bands that only exist to feed an app store listing.
+
   The accent gradient covers one phrase of the headline; the split is done here so the
   sentence itself still lives only in `funnel_copy.py`, and if that sentence ever stops
   containing the phrase the headline renders plain rather than breaking.
 
   Nothing carrying a price or a disclosure line is `.reveal`: those render on first paint.
 #}
-<section class="px-3 pt-3 sm:px-4 sm:pt-4">
-  <div class="panel relative overflow-hidden bg-[#fffaf5]">
-    <div class="pointer-events-none absolute -top-24 -left-20 h-80 w-80 rounded-full bg-ember/20 blur-3xl" aria-hidden="true"></div>
-    <div class="pointer-events-none absolute -bottom-28 -right-16 h-96 w-96 rounded-full bg-[#d6336c]/10 blur-3xl" aria-hidden="true"></div>
+<div class="px-3 pt-3 sm:px-4 sm:pt-4 space-y-3 sm:space-y-4">
 
-    <div class="relative mx-auto max-w-copy px-3 sm:px-6 pt-10 pb-10 sm:pt-16 sm:pb-14">
+<section data-section="hero" class="band band-tint relative overflow-hidden">
+  <div class="pointer-events-none absolute -top-24 -left-20 h-80 w-80 rounded-full bg-ember/20 blur-3xl" aria-hidden="true"></div>
+  <div class="pointer-events-none absolute -bottom-28 -right-16 h-96 w-96 rounded-full bg-[#d6336c]/10 blur-3xl" aria-hidden="true"></div>
 
-      <ul class="stagger grid grid-cols-3 gap-2 sm:gap-3">
-        {% for phrase in [question_count ~ ' questions', 'about 4 minutes', 'see week 1 free'] %}
-          <li class="reveal surface-float rounded-2xl bg-white px-2 py-3 sm:px-3 sm:py-4 text-center" style="--i: {{ loop.index0 }}">
-            <span class="mx-auto mb-1.5 block h-1.5 w-1.5 rounded-full {{ ['bg-ember', 'bg-[#f08c00]', 'bg-moss'][loop.index0] }}" aria-hidden="true"></span>
-            <span class="block text-[13px] sm:text-[15px] font-semibold leading-tight text-ink">{{ phrase }}</span>
-          </li>
-        {% endfor %}
-      </ul>
+  <div class="relative mx-auto max-w-copy text-center">
 
-      {% set accent = 'the week you actually have' %}
-      <h1 class="mt-8 text-[34px] leading-[38px] tracking-[-1.2px] sm:text-[52px] sm:leading-[56px] sm:tracking-[-2.4px] font-semibold text-balance">
-        {%- if accent in copy.hero_headline -%}
-          {%- set parts = copy.hero_headline.split(accent, 1) -%}
-          {{ parts[0] }}<span class="text-gradient">{{ accent }}</span>{{ parts[1] }}
-        {%- else -%}
-          {{ copy.hero_headline }}
-        {%- endif -%}
-      </h1>
+    <ul class="stagger grid grid-cols-3 gap-2 sm:gap-3 text-left">
+      {% for phrase in [question_count ~ ' questions', 'about 4 minutes', 'see week 1 free'] %}
+        <li class="reveal surface-float rounded-2xl bg-white px-2 py-3 sm:px-3 sm:py-4 text-center" style="--i: {{ loop.index0 }}">
+          {# Decorative bullets, so `bg-ember` here is the token, not a literal, and the amber
+             is `var(--ember-brighter)`: 6px of colour carries no contrast obligation, but a raw
+             hex in a utility would read as a text colour to the next person. #}
+          <span class="mx-auto mb-1.5 block h-1.5 w-1.5 rounded-full {{ ['bg-ember', 'bg-[var(--ember-brighter)]', 'bg-moss'][loop.index0] }}" aria-hidden="true"></span>
+          <span class="block text-[13px] sm:text-[15px] font-semibold leading-tight text-ink">{{ phrase }}</span>
+        </li>
+      {% endfor %}
+    </ul>
 
-      <p class="mt-5 text-lg text-muted leading-relaxed">{{ copy.hero_sub }}</p>
+    <p class="eyebrow mt-8">Habit structure, not another diet</p>
+
+    {% set accent = 'the week you actually have' %}
+    <h1 class="display mt-5">
+      {%- if accent in copy.hero_headline -%}
+        {%- set parts = copy.hero_headline.split(accent, 1) -%}
+        {{ parts[0] }}<span class="text-gradient">{{ accent }}</span>{{ parts[1] }}
+      {%- else -%}
+        {{ copy.hero_headline }}
+      {%- endif -%}
+    </h1>
+
+    <p class="mt-5 text-lg sm:text-xl text-muted leading-relaxed">{{ copy.hero_sub }}</p>
 
     <div class="mt-8">
       <a href="/onboarding/0"
-         class="btn-primary inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl px-4 sm:px-7 py-4 text-lg font-semibold">
+         class="btn-primary inline-flex w-full sm:w-auto items-center justify-center gap-2 px-4 sm:px-8 py-4 text-lg font-semibold">
         {{ copy.primary_cta }}
         <span aria-hidden="true">&rarr;</span>
       </a>
@@ -59,80 +68,102 @@
 
     {# Disclosures on the landing page, not only at checkout. Cheap insurance: a visitor
        who bounces at the price saved us a trial they would have refunded. #}
-    <ul class="mt-6 space-y-1.5 text-sm text-muted">
+    <ul class="mt-7 grid gap-2 text-left text-sm text-muted sm:mx-auto sm:max-w-md">
       {% for key, text in copy.disclosures.items() %}
         {% if key in ('price_line', 'cancel_line', 'refund_line') %}
           <li class="flex gap-2"><span class="text-moss mt-0.5" aria-hidden="true">&#10003;</span><span>{{ text }}</span></li>
         {% endif %}
       {% endfor %}
     </ul>
-    </div>
   </div>
 </section>
 
-<section class="mx-auto max-w-copy px-4 py-10" aria-labelledby="how">
-  <h2 id="how" class="text-xl font-bold tracking-tight">How it works</h2>
-  <ol class="stagger mt-5 space-y-5">
+{# Proof strip. The reference leads with a band of numbers; ours states the three things a
+   sceptic actually needs, and every one of them is checkable on this site, so nothing here
+   is a claim about bodies. #}
+<section data-section="proof" class="band band-deep" aria-labelledby="promise">
+  <h2 id="promise" class="band-heading text-center">What this is, plainly</h2>
+  <ul class="stagger mx-auto mt-8 grid max-w-3xl gap-4 sm:grid-cols-3">
+    {% for heading, body in [
+      ('A plan, not a promise', 'Structure for seven days, built from the days, minutes and equipment you said you have.'),
+      ('Yours before you pay', 'The week renders on screen from your own answers. Nothing is blurred, nothing is a screenshot.'),
+      ('Cancellable in one click', 'No retention maze between the cancel button and a cancelled subscription.')
+    ] %}
+      <li class="reveal band-panel rounded-3xl p-5 sm:p-6" style="--i: {{ loop.index0 }}">
+        <h3 class="font-semibold text-[17px] tracking-[-0.3px]">{{ heading }}</h3>
+        <p class="text-muted mt-1.5 text-sm leading-relaxed">{{ body }}</p>
+      </li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section data-section="how" class="band band-panel" aria-labelledby="how">
+  <p class="eyebrow eyebrow-moss">How it works</p>
+  <h2 id="how" class="band-heading mt-4">Four minutes, then a week you can look at</h2>
+  <ol class="stagger mt-8 grid gap-5 sm:grid-cols-3">
     {% for number, heading, body in steps %}
-      <li class="reveal flex gap-4" style="--i: {{ loop.index0 }}">
-        <span class="shrink-0 w-8 h-8 rounded-full bg-ember-soft text-ember-dark font-bold grid place-items-center text-sm"
+      <li class="reveal" style="--i: {{ loop.index0 }}">
+        <span class="inline-grid place-items-center w-10 h-10 rounded-full bg-ember-soft text-ember-dark font-bold"
               aria-hidden="true">{{ number }}</span>
-        <div>
-          <h3 class="font-semibold">{{ heading }}</h3>
-          <p class="text-muted mt-1 leading-relaxed">{{ body }}</p>
-        </div>
+        <h3 class="mt-3 font-semibold text-[17px] tracking-[-0.3px]">{{ heading }}</h3>
+        <p class="text-muted mt-1.5 leading-relaxed">{{ body }}</p>
       </li>
     {% endfor %}
   </ol>
 </section>
 
-<section class="mx-auto max-w-copy px-4 py-10" aria-labelledby="artefact">
-  <h2 id="artefact" class="text-xl font-bold tracking-tight">What you get before you pay</h2>
-  <p class="text-muted mt-2 leading-relaxed">
-    This is the whole point of the exercise: you see a real week built from your answers,
-    then decide. Nothing is blurred out and nothing is a screenshot.
-  </p>
-  <div class="stagger mt-5 grid sm:grid-cols-2 gap-4">
-    <div class="reveal surface-float rounded-3xl bg-white p-5" style="--i: 0">
-      <h3 class="font-semibold text-sm uppercase tracking-wide text-moss">Free, before any card</h3>
-      <ul class="mt-3 space-y-2 text-sm">
+<section data-section="artefact" class="band band-tint" aria-labelledby="artefact">
+  <div class="mx-auto max-w-2xl text-center">
+    <p class="eyebrow">Before the card details</p>
+    <h2 id="artefact" class="band-heading mt-4">What you get for free</h2>
+    <p class="mt-4 text-lg text-muted leading-relaxed">
+      This is the whole point of the exercise: you see a real week built from your answers,
+      then decide. Nothing is blurred out and nothing is a screenshot.
+    </p>
+  </div>
+  <div class="stagger mx-auto mt-8 grid max-w-3xl gap-4 sm:grid-cols-2">
+    <div class="reveal rounded-3xl bg-white p-6 surface-float" style="--i: 0">
+      <h3 class="eyebrow-title eyebrow-title-moss">Free, before any card</h3>
+      <ul class="mt-4 space-y-2.5 text-sm">
         {% for item in what_you_see %}
-          <li class="flex gap-2"><span class="text-moss shrink-0" aria-hidden="true">&#10003;</span><span>{{ item }}</span></li>
+          <li class="flex gap-2.5"><span class="text-moss shrink-0" aria-hidden="true">&#10003;</span><span>{{ item }}</span></li>
         {% endfor %}
       </ul>
     </div>
-    <div class="reveal surface-float rounded-3xl bg-cream p-5" style="--i: 1">
-      <h3 class="font-semibold text-sm uppercase tracking-wide text-muted">With the trial</h3>
-      <ul class="mt-3 space-y-2 text-sm">
+    <div class="reveal rounded-3xl bg-cream p-6" style="--i: 1">
+      <h3 class="eyebrow-title">With the trial</h3>
+      <ul class="mt-4 space-y-2.5 text-sm">
         {% for item in what_unlocks %}
-          <li class="flex gap-2"><span class="muted shrink-0" aria-hidden="true">&#9413;</span><span>{{ item }}</span></li>
+          <li class="flex gap-2.5"><span class="shrink-0 text-muted" aria-hidden="true">&#9413;</span><span>{{ item }}</span></li>
         {% endfor %}
       </ul>
     </div>
   </div>
 </section>
 
-<section class="mx-auto max-w-copy px-4 py-10" aria-labelledby="trust">
-  <h2 id="trust" class="text-xl font-bold tracking-tight">The parts most funnels hide</h2>
-  <dl class="stagger mt-5 space-y-4">
+<section data-section="trust" class="band band-panel" aria-labelledby="trust">
+  <h2 id="trust" class="band-heading text-center">The parts most funnels hide</h2>
+  <dl class="stagger mx-auto mt-8 grid max-w-3xl gap-4 sm:grid-cols-2">
     {% for heading, body in trust_points %}
-      <div class="reveal surface-float rounded-3xl bg-white p-5" style="--i: {{ loop.index0 }}">
-        <dt class="font-semibold">{{ heading }}</dt>
-        <dd class="text-muted mt-1 text-sm leading-relaxed">{{ body }}</dd>
+      <div class="reveal band-tint rounded-3xl p-6" style="--i: {{ loop.index0 }}">
+        <dt class="font-semibold text-[17px] tracking-[-0.3px]">{{ heading }}</dt>
+        <dd class="text-muted mt-1.5 text-sm leading-relaxed">{{ body }}</dd>
       </div>
     {% endfor %}
   </dl>
 </section>
 
-<section class="mx-auto max-w-copy px-4 pb-14">
+<section data-section="close" class="band band-deep">
   {# Carries the price in its fine print, so it is not a `.reveal`. #}
-  <div class="panel bg-ink text-paper p-6 sm:p-8">
-    <h2 class="text-xl font-bold tracking-tight">Four minutes now, a week you can follow tonight</h2>
-    <p class="mt-2 text-paper/80 leading-relaxed">{{ copy.cta_fine_print }}</p>
+  <div class="mx-auto max-w-2xl text-center">
+    <h2 class="band-heading">Four minutes now, a week you can follow tonight</h2>
+    <p class="mt-4 text-lg text-muted leading-relaxed">{{ copy.cta_fine_print }}</p>
     <a href="/onboarding/0"
-       class="btn-primary mt-5 inline-flex items-center gap-2 rounded-2xl px-6 py-3.5 font-semibold">
+       class="btn-primary mt-7 inline-flex items-center justify-center gap-2 px-8 py-4 text-lg font-semibold">
       {{ copy.primary_cta }} <span aria-hidden="true">&rarr;</span>
     </a>
   </div>
 </section>
+
+</div>
 {% endblock %}

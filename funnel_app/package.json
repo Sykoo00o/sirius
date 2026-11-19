@@ -1,0 +1,21 @@
+{
+  "name": "funnel_app",
+  "version": "1.0.0",
+  "description": "A standalone pre-paywall funnel, kept separate from the B2B apps on its own port (8090), its own SQLite file and its own deploy. It shares code with nothing that bills.",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "pixelmatch": "^8.0.0",
+    "playwright": "^1.65.1",
+    "pngjs": "^7.0.0"
+  }
+}

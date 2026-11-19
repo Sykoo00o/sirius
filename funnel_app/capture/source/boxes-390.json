@@ -1,0 +1,41 @@
+{
+  "header": {
+    "top": 630,
+    "height": 48
+  },
+  "hero": {
+    "top": 69,
+    "height": 779
+  },
+  "trusted": {
+    "top": 946,
+    "height": 310
+  },
+  "features": {
+    "top": 3686,
+    "height": 1461
+  },
+  "testimonial": {
+    "top": 5629,
+    "height": 320
+  },
+  "faq": {
+    "top": 5987,
+    "height": 1032
+  },
+  "coach": {
+    "missing": true
+  },
+  "blog": {
+    "top": 7616,
+    "height": 316
+  },
+  "contacts": {
+    "top": 8831,
+    "height": 1238
+  },
+  "footer": {
+    "top": 8831,
+    "height": 1238
+  }
+}

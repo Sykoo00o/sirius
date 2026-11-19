@@ -1,0 +1,12 @@
+{
+  "header": "header",
+  "hero": ".first-section",
+  "trusted": ".trusted",
+  "features": "#features",
+  "testimonial": "#Teresa-poster",
+  "faq": "#faq",
+  "coach": "section.bg-section:nth-of-type(6)",
+  "blog": "article.latest-blog-item",
+  "contacts": "#contacts",
+  "footer": "footer"
+}
