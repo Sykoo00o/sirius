@@ -82,6 +82,7 @@
    nobody asked for. */
 .btn-primary {
   position: relative;
+  isolation: isolate;   /* own stacking context, so the hover layer can sit at z -1 */
   color: #fff;
   background: var(--grad-cta);
   border-bottom: 3px solid rgba(160, 58, 6, 0.45);
@@ -102,8 +103,11 @@
   opacity: 0;
   transition: opacity 200ms var(--ease-out-soft);
   pointer-events: none;
+  /* Behind the label, above the button's own background. A positioned layer at the
+     default z would paint over bare text nodes ("Start my trial for $2.99"), which are
+     not elements and cannot be lifted above it. */
+  z-index: -1;
 }
-.btn-primary > * { position: relative; }
 @media (hover: hover) {
   .btn-primary:hover { transform: translateY(-2px); box-shadow: var(--shadow-cta-hover); }
   .btn-primary:hover::before { opacity: 1; }
@@ -141,6 +145,17 @@ html.js .reveal.is-visible {
    from `--i`. Set `--i` inline (`style="--i: 2"`) or via `loop.index0` in Jinja. */
 .stagger > .reveal { transition-delay: calc(var(--i, 0) * 80ms); }
 
+/* Quick variant for pages that are themselves a sequence (the twelve quiz steps). Every
+   step is a full page load, so the entrance replays twelve times: 200ms, 4px, 50ms
+   apart keeps three staggered parts inside ~300ms, under the threshold where it starts
+   reading as a slow page rather than a finished one. */
+html.js .reveal.reveal-quick {
+  transform: translateY(4px);
+  transition-duration: 200ms;
+  transition-delay: calc(var(--i, 0) * 50ms);
+}
+html.js .reveal.reveal-quick.is-visible { transform: none; }
+
 /* ---------------------------------------------------------------------------
    Reduced motion
    --------------------------------------------------------------------------- */
@@ -148,6 +163,11 @@ html.js .reveal.is-visible {
 @media (prefers-reduced-motion: no-preference) {
   details[open] > div { animation: reveal 140ms ease-out; }
 }
+
+/* Disclosure caret on `<details>` cards: rotates rather than swapping glyphs, so open and
+   close read as one control changing state. */
+.caret { display: inline-block; transition: transform 200ms var(--ease-out-soft); }
+details[open] .caret { transform: rotate(180deg); }
 
 @keyframes reveal {
   from { opacity: 0; transform: translateY(-2px); }
