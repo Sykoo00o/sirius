@@ -368,18 +368,27 @@ this" is always checkable rather than assumed.
 | C | Save-offer sequencing at cancel (pause / downgrade / 50% x 2 months) | `reasoning` | Once | Wording must never obstruct the cancel action |
 | C | Read the week's refund reasons, propose the policy tweak | `reasoning` | Weekly | Policy changes are a human decision and a named tripwire |
 
-**Experiment discipline, and one hard adjustment to the plan.** `funnel_sequences` carries `angle`, `headline`,
-`offer_id` and `sequence_json`, so per-variant metrics are already representable. **`ad_spend_minor` also already
-exists on that table**, so "spend stays manual" cannot mean "no column for spend"; it means *a human spends it*.
+**Correction, verified against source after the first draft of this document.** An earlier revision claimed
+`funnel_sequences` carries `angle`, `headline`, `sequence_json` and `ad_spend_minor`. It carries **none of those**.
+Its real columns (`funnel_worker.py:261`, created by inline DDL, not by `schema.sql`) are `visitor_key,
+funnel_type ∈ (tripwire, trial), offer_id, landing_url, status, scheduled_at, opt_in_at, trial_days,
+trial_amount_minor, rebill_amount_minor, currency, payload jsonb, last_error`, plus identity and timestamps.
+`grep ad_spend_minor` across all `.sql` and `.py` returns **zero hits**. So there is no first-class column for an
+ad angle, a headline, or spend: variant identity goes in `payload::jsonb` (free-form) or needs a migration, and
+spend lives in `transactions` from gate-posted intents, rolling into `hustle_metrics.cost_minor`. "Spend stays
+manual" therefore means exactly what it says: *a human spends it*, and there is no column pretending otherwise.
 
-**ADJUSTMENT (new constraint):** a strict one-change-at-a-time rule is required for lane C during validation,
-even though the schema supports multi-armed testing. The reason is arithmetic: at the volumes the gate demands
-(e.g. ~400 trials before 30 conversions), a 4-arm bandit gives every arm a confidence interval wider than the
-effect being tested, so a multi-arm test at validation volume produces a *story*, not a result. Run sequential
-single-variable tests, and do not let an agent pick the winner until arms carry enough events to be compared.
+**ADJUSTMENT (new constraint):** a strict one-change-at-a-time rule is required for lane C during validation.
+The reason is arithmetic, not preference: at the volumes the gate demands (~5,000 trials at 4% conversion to reach
+200 paid conversions; splitting 400 trials four ways leaves ~30 events per arm, a 95% interval of roughly ±7
+points against an effect of 3-5 points), a multi-arm test at validation volume produces a *story*, not a result.
+Run sequential single-variable tests with a pre-registered primary metric and a fixed n, and do not let an agent
+pick the winner until arms carry enough events to be compared.
 
-Logging target for test results: a `hustle_metrics` row per day per lane from day 1 (fields exist for the full
-lane-C set), with `funnel_sequences.angle` / `headline` carrying the variant identity. Report from **one** rollup
+Logging target for test results: a `hustle_metrics` row per day per lane from day 1, with variant identity in
+`funnel_sequences.payload` or `trial_events.offer_id`. Note the rollup is keyed `(day, hustle)` with no
+per-visitor dimension, so cohort metrics such as **month-2 retention must come from `trial_events`**, not from
+any rollup. Report from **one** rollup
 per lane and say which: `engine.hustle_metrics` (Stack A) and `engine.daily_metrics` (Stack B) are different
 tables in different schemas, nothing reconciles them, and two dashboards quoting two numbers is how a lane looks
 profitable while bleeding.
