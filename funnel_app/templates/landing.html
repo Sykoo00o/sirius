@@ -9,24 +9,48 @@
   price. Test 7 in the queue (headline variants) comes *after* the ratio tests, so this
   headline is the baseline and stays boring on purpose.
 #}
-<section class="relative overflow-hidden">
-  <div class="absolute inset-0 -z-10 bg-gradient-to-b from-ember-soft/70 via-paper to-paper" aria-hidden="true"></div>
-  <div class="mx-auto max-w-copy px-4 pt-14 pb-12 sm:pt-20">
+{#
+  Hero as one rounded panel inset from the page edge, with two blurred glow shapes behind
+  it. Pure CSS and `aria-hidden`: decoration carries no information.
 
-    <p class="inline-flex items-center gap-2 rounded-full bg-white border border-line px-3 py-1 text-xs font-medium text-muted">
-      <span class="w-1.5 h-1.5 rounded-full bg-moss" aria-hidden="true"></span>
-      {{ question_count }} questions &middot; about 4 minutes &middot; see week 1 free
-    </p>
+  The three tiles are the old pill badge's three phrases, word for word, given more room.
+  The accent gradient covers one phrase of the headline; the split is done here so the
+  sentence itself still lives only in `funnel_copy.py`, and if that sentence ever stops
+  containing the phrase the headline renders plain rather than breaking.
 
-    <h1 class="mt-5 text-[2rem] sm:text-[2.6rem] leading-[1.1] font-bold tracking-tight text-balance">
-      {{ copy.hero_headline }}
-    </h1>
+  Nothing carrying a price or a disclosure line is `.reveal`: those render on first paint.
+#}
+<section class="px-3 pt-3 sm:px-4 sm:pt-4">
+  <div class="panel relative overflow-hidden bg-[#fffaf5]">
+    <div class="pointer-events-none absolute -top-24 -left-20 h-80 w-80 rounded-full bg-ember/20 blur-3xl" aria-hidden="true"></div>
+    <div class="pointer-events-none absolute -bottom-28 -right-16 h-96 w-96 rounded-full bg-[#d6336c]/10 blur-3xl" aria-hidden="true"></div>
 
-    <p class="mt-5 text-lg text-muted leading-relaxed">{{ copy.hero_sub }}</p>
+    <div class="relative mx-auto max-w-copy px-4 sm:px-6 pt-10 pb-10 sm:pt-16 sm:pb-14">
+
+      <ul class="stagger grid grid-cols-3 gap-2 sm:gap-3">
+        {% for phrase in [question_count ~ ' questions', 'about 4 minutes', 'see week 1 free'] %}
+          <li class="reveal surface-float rounded-2xl bg-white px-2 py-3 sm:px-3 sm:py-4 text-center" style="--i: {{ loop.index0 }}">
+            <span class="mx-auto mb-1.5 block h-1.5 w-1.5 rounded-full {{ ['bg-ember', 'bg-[#f08c00]', 'bg-moss'][loop.index0] }}" aria-hidden="true"></span>
+            <span class="block text-[13px] sm:text-[15px] font-semibold leading-tight text-ink">{{ phrase }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+
+      {% set accent = 'the week you actually have' %}
+      <h1 class="mt-8 text-[34px] leading-[38px] tracking-[-1.2px] sm:text-[52px] sm:leading-[56px] sm:tracking-[-2.4px] font-semibold text-balance">
+        {%- if accent in copy.hero_headline -%}
+          {%- set parts = copy.hero_headline.split(accent, 1) -%}
+          {{ parts[0] }}<span class="text-gradient">{{ accent }}</span>{{ parts[1] }}
+        {%- else -%}
+          {{ copy.hero_headline }}
+        {%- endif -%}
+      </h1>
+
+      <p class="mt-5 text-lg text-muted leading-relaxed">{{ copy.hero_sub }}</p>
 
     <div class="mt-8">
       <a href="/onboarding/0"
-         class="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl bg-ember px-7 py-4 text-lg font-semibold text-white shadow-sm transition hover:bg-ember-dark active:translate-y-px">
+         class="btn-primary inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-2xl px-7 py-4 text-lg font-semibold">
         {{ copy.primary_cta }}
         <span aria-hidden="true">&rarr;</span>
       </a>
@@ -42,14 +66,15 @@
         {% endif %}
       {% endfor %}
     </ul>
+    </div>
   </div>
 </section>
 
 <section class="mx-auto max-w-copy px-4 py-10" aria-labelledby="how">
   <h2 id="how" class="text-xl font-bold tracking-tight">How it works</h2>
-  <ol class="mt-5 space-y-5">
+  <ol class="stagger mt-5 space-y-5">
     {% for number, heading, body in steps %}
-      <li class="flex gap-4">
+      <li class="reveal flex gap-4" style="--i: {{ loop.index0 }}">
         <span class="shrink-0 w-8 h-8 rounded-full bg-ember-soft text-ember-dark font-bold grid place-items-center text-sm"
               aria-hidden="true">{{ number }}</span>
         <div>
@@ -67,8 +92,8 @@
     This is the whole point of the exercise: you see a real week built from your answers,
     then decide. Nothing is blurred out and nothing is a screenshot.
   </p>
-  <div class="mt-5 grid sm:grid-cols-2 gap-4">
-    <div class="rounded-2xl border border-line bg-white p-5">
+  <div class="stagger mt-5 grid sm:grid-cols-2 gap-4">
+    <div class="reveal surface-float rounded-3xl bg-white p-5" style="--i: 0">
       <h3 class="font-semibold text-sm uppercase tracking-wide text-moss">Free, before any card</h3>
       <ul class="mt-3 space-y-2 text-sm">
         {% for item in what_you_see %}
@@ -76,7 +101,7 @@
         {% endfor %}
       </ul>
     </div>
-    <div class="rounded-2xl border border-line bg-cream p-5">
+    <div class="reveal surface-float rounded-3xl bg-cream p-5" style="--i: 1">
       <h3 class="font-semibold text-sm uppercase tracking-wide text-muted">With the trial</h3>
       <ul class="mt-3 space-y-2 text-sm">
         {% for item in what_unlocks %}
@@ -89,9 +114,9 @@
 
 <section class="mx-auto max-w-copy px-4 py-10" aria-labelledby="trust">
   <h2 id="trust" class="text-xl font-bold tracking-tight">The parts most funnels hide</h2>
-  <dl class="mt-5 space-y-4">
+  <dl class="stagger mt-5 space-y-4">
     {% for heading, body in trust_points %}
-      <div class="rounded-2xl border border-line bg-white p-5">
+      <div class="reveal surface-float rounded-3xl bg-white p-5" style="--i: {{ loop.index0 }}">
         <dt class="font-semibold">{{ heading }}</dt>
         <dd class="text-muted mt-1 text-sm leading-relaxed">{{ body }}</dd>
       </div>
@@ -100,11 +125,12 @@
 </section>
 
 <section class="mx-auto max-w-copy px-4 pb-14">
-  <div class="rounded-2xl bg-ink text-paper p-6 sm:p-8">
+  {# Carries the price in its fine print, so it is not a `.reveal`. #}
+  <div class="panel bg-ink text-paper p-6 sm:p-8">
     <h2 class="text-xl font-bold tracking-tight">Four minutes now, a week you can follow tonight</h2>
     <p class="mt-2 text-paper/80 leading-relaxed">{{ copy.cta_fine_print }}</p>
     <a href="/onboarding/0"
-       class="mt-5 inline-flex items-center gap-2 rounded-2xl bg-white text-ink px-6 py-3.5 font-semibold transition hover:bg-paper active:translate-y-px">
+       class="btn-primary mt-5 inline-flex items-center gap-2 rounded-2xl px-6 py-3.5 font-semibold">
       {{ copy.primary_cta }} <span aria-hidden="true">&rarr;</span>
     </a>
   </div>
