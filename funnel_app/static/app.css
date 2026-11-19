@@ -1,18 +1,149 @@
-/* Progressive enhancement only. Tailwind carries the design; this file exists for the
-   two things a utility pass cannot express portably: a print stylesheet for the plan,
-   and a reduced-motion path for the progress transitions.
+/* Tailwind carries the layout. This file holds what a utility pass cannot express
+   portably: the print stylesheet, the reduced-motion path, and (since the UI polish
+   pass, `UI_POLISH_PLAN.md` step 1) the shared surface and motion vocabulary every page
+   draws from, so a shadow or an easing curve is defined once and never retyped.
 
    Print matters commercially, not cosmetically. Export is a paid feature, and a visitor
    who prints or saves the free week 1 as PDF is someone who found the artefact useful,
    which is the signal the trial is priced on. */
 
-@media print {
-  header, footer, [role="status"], details > summary::after, .no-print { display: none !important; }
-  details > div { display: block !important; }   /* expanded or not, print shows everything */
-  body { background: #fff; color: #000; }
-  main { max-width: none; }
-  a[href^="http"]::after { content: ""; }        /* no URL spam on a printed plan */
+/* ---------------------------------------------------------------------------
+   Tokens
+   --------------------------------------------------------------------------- */
+
+:root {
+  /* Five stacked low-alpha shadows: depth that reads on any background, which a solid
+     border cannot do. Tinted warm so it sits on paper rather than looking grey. */
+  --shadow-float:
+    0 1px 2px rgba(43, 38, 34, 0.04),
+    0 4px 10px rgba(43, 38, 34, 0.04),
+    0 14px 24px rgba(43, 38, 34, 0.05),
+    0 32px 40px rgba(43, 38, 34, 0.04),
+    0 56px 64px rgba(43, 38, 34, 0.02);
+  --shadow-hairline: 0 1px 0 rgba(43, 38, 34, 0.06);
+  --shadow-cta:
+    0 4px 12px rgba(232, 89, 12, 0.28),
+    0 2px 6px rgba(43, 38, 34, 0.10),
+    inset 0 0 16px rgba(255, 255, 255, 0.22);
+  --shadow-cta-hover:
+    0 10px 26px rgba(232, 89, 12, 0.36),
+    0 4px 14px rgba(43, 38, 34, 0.12),
+    inset 0 0 20px rgba(255, 255, 255, 0.30);
+
+  /* Fast start, long settle: reads as responsive without a bounce. */
+  --ease-out-soft: cubic-bezier(0.2, 0, 0, 1);
+
+  /* One accent gradient, used for a single phrase per page and nowhere else. */
+  --grad-accent: linear-gradient(90deg, #e8590c 0%, #f08c00 48%, #d6336c 100%);
+  --grad-cta:
+    radial-gradient(140% 120% at 110% 50%, rgba(214, 51, 108, 0.55), rgba(214, 51, 108, 0) 60%),
+    linear-gradient(95deg, #e8590c 10%, #f0700a 100%);
+  --grad-cta-hover:
+    radial-gradient(140% 120% at 110% 50%, rgba(214, 51, 108, 0.75), rgba(214, 51, 108, 0) 65%),
+    linear-gradient(95deg, #e8590c 0%, #f08c00 100%);
 }
+
+/* ---------------------------------------------------------------------------
+   Surfaces
+   --------------------------------------------------------------------------- */
+
+/* Big rounded section panel. 24px on phones, 40px from `sm`: the copy column is narrow,
+   so simple.life's 80px would read as a pill rather than a page. */
+.panel {
+  border-radius: 24px;
+  box-shadow: var(--shadow-float);
+}
+@media (min-width: 640px) {
+  .panel { border-radius: 40px; }
+}
+
+/* Card lifted by shadow rather than outlined. */
+.surface-float { box-shadow: var(--shadow-float); }
+
+/* Gradient-clipped text for one accent phrase. `color` stays set as the fallback, so a
+   browser without background-clip still renders legible ember text, never transparent. */
+.text-gradient {
+  color: #e8590c;
+  background-image: var(--grad-accent);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .text-gradient { -webkit-text-fill-color: transparent; }
+}
+
+/* ---------------------------------------------------------------------------
+   Primary button
+   --------------------------------------------------------------------------- */
+
+/* Gradient body plus a 3px darker lip on the bottom edge, so the button looks pressable
+   before it is touched. Hover lifts 2px; press flattens and shrinks to 0.96. Transitions
+   name their properties: `transition: all` would also animate layout and colour changes
+   nobody asked for. */
+.btn-primary {
+  position: relative;
+  color: #fff;
+  background: var(--grad-cta);
+  border-bottom: 3px solid rgba(160, 58, 6, 0.45);
+  box-shadow: var(--shadow-cta);
+  transition-property: transform, box-shadow, background-color, border-color;
+  transition-duration: 200ms;
+  transition-timing-function: var(--ease-out-soft);
+  -webkit-tap-highlight-color: transparent;
+}
+.btn-primary::before {
+  /* Hover gradient on its own layer and cross-faded by opacity, because gradients
+     themselves cannot be transitioned. */
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--grad-cta-hover);
+  opacity: 0;
+  transition: opacity 200ms var(--ease-out-soft);
+  pointer-events: none;
+}
+.btn-primary > * { position: relative; }
+@media (hover: hover) {
+  .btn-primary:hover { transform: translateY(-2px); box-shadow: var(--shadow-cta-hover); }
+  .btn-primary:hover::before { opacity: 1; }
+}
+.btn-primary:active {
+  transform: translateY(0) scale(0.96);
+  border-bottom-color: transparent;
+  box-shadow: 0 2px 6px rgba(232, 89, 12, 0.22);
+  transition-duration: 90ms;
+}
+.btn-primary:focus-visible { outline: 3px solid #e8590c; outline-offset: 3px; }
+
+/* ---------------------------------------------------------------------------
+   Scroll reveal
+   --------------------------------------------------------------------------- */
+
+/* Gated on `html.js`, which `base.html` sets inline before first paint. Without JS, or
+   when the observer never fires, nothing is ever hidden: a reveal is decoration, and the
+   funnel's disclosures must not depend on decoration. Never put `.reveal` on an element
+   that carries a disclosure line, a price, or the rehearsal banner. */
+html.js .reveal {
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity 450ms var(--ease-out-soft),
+    transform 450ms var(--ease-out-soft);
+  transition-delay: calc(var(--i, 0) * 80ms);
+}
+html.js .reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+/* Stagger helper: children of `.stagger` that are also `.reveal` pick up their delay
+   from `--i`. Set `--i` inline (`style="--i: 2"`) or via `loop.index0` in Jinja. */
+.stagger > .reveal { transition-delay: calc(var(--i, 0) * 80ms); }
+
+/* ---------------------------------------------------------------------------
+   Reduced motion
+   --------------------------------------------------------------------------- */
 
 @media (prefers-reduced-motion: no-preference) {
   details[open] > div { animation: reveal 140ms ease-out; }
@@ -21,6 +152,29 @@
 @keyframes reveal {
   from { opacity: 0; transform: translateY(-2px); }
   to   { opacity: 1; transform: none; }
+}
+
+/* `base.html` already zeroes every transition under reduce. That alone would leave a
+   `.reveal` element stuck at opacity 0 if it had not been observed yet, so the resting
+   state is forced visible here as well. */
+@media (prefers-reduced-motion: reduce) {
+  html.js .reveal { opacity: 1; transform: none; }
+  .btn-primary:hover, .btn-primary:active { transform: none; }
+}
+
+/* ---------------------------------------------------------------------------
+   Print
+   --------------------------------------------------------------------------- */
+
+@media print {
+  header, footer, [role="status"], details > summary::after, .no-print { display: none !important; }
+  details > div { display: block !important; }   /* expanded or not, print shows everything */
+  body { background: #fff; color: #000; }
+  main { max-width: none; }
+  a[href^="http"]::after { content: ""; }        /* no URL spam on a printed plan */
+  html.js .reveal { opacity: 1 !important; transform: none !important; }
+  .panel, .surface-float { box-shadow: none; border: 1px solid #ccc; }
+  .text-gradient { -webkit-text-fill-color: currentColor; background: none; color: #000; }
 }
 
 /* Locked content stays readable. The lock is honest about *what* is missing, so it is
