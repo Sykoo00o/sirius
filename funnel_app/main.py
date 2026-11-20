@@ -50,6 +50,7 @@ import billing as billing_module
 import claims
 import save_offer
 import stripe_billing
+import telemetry
 from billing_store import BillingStore, human_date, plan_label
 from config import FunnelSettings
 from funnel_copy import (ARTIFACT_FREE, ARTIFACT_PAID, TRUST_POINTS, Copy, build_copy,
@@ -74,6 +75,12 @@ settings = FunnelSettings.from_env()
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 store = ResponseStore(settings.database_abspath)
 billing_store = BillingStore(settings.billing_database_abspath)
+#: Funnel telemetry lives in the *billing* database file, beside the subscription rows rather
+#: than beside the quiz responses. The Day-1 export compares event counts against subscription
+#: counts, and reading both from one file removes the one race that could make the two
+#: disagree: two connections, one write between the reads, and a day whose paid count is
+#: higher than its trial count.
+events_store = telemetry.TelemetryStore(settings.billing_database_abspath)
 mailer = Mailer(settings)
 codec = SessionCodec(settings.session_secret)
 
@@ -83,7 +90,8 @@ codec = SessionCodec(settings.session_secret)
 #: happen if a key appeared, and an operator deciding whether to flip `FUNNEL_CHARGES_ENABLED`
 #: needs the account type and descriptor off the live account, not a stale snapshot taken
 #: before the key was added. Construction errors still surface, on the page built to show them.
-billing = billing_module.BillingService(settings, billing_store, mailer, None)
+billing = billing_module.BillingService(settings, billing_store, mailer, None,
+                                       telemetry=events_store)
 
 #: Has this process shown a member a renewal date read from the provider? Process-local on
 #: purpose, and named to be read in `billing_readiness`: after a restart the answer is no, and an
@@ -192,6 +200,157 @@ def answers_for(request: Request) -> dict[str, Any]:
 def form_answers(stored: dict[str, Any]) -> dict[str, Any]:
     """Strip internal keys before persisting a snapshot."""
     return {k: v for k, v in stored.items() if not k.startswith("_")}
+
+
+# ---------------------------------------------------------------------------
+# Funnel telemetry
+# ---------------------------------------------------------------------------
+
+#: Page-view events, keyed by path prefix, with whether one is counted per visitor or per visit.
+#:
+#: Per-visitor (`dedupe` True) for the top of the funnel, because `sessions` and `lp_views` in
+#: the §3.4 sheet mean "distinct people who saw this", and the LP→trial rate is quoted against
+#: them: a visitor who refreshes the landing page four times is one session, and if they open a
+#: second tab the same afternoon they are still one. The dedupe key is the visitor plus the day,
+#: so a visitor returning tomorrow *is* a second session, which is what a daily sessions column
+#: counts. The quiz rows are per-visit for the same reason they are per-visitor-keyed, and
+#: `quiz_completed` is keyed per visitor because a finished quiz is a finished quiz however many
+#: times the summary page is reloaded on the way to checkout.
+PAGE_EVENTS: tuple[tuple[str, str, bool], ...] = (
+    ("/", "lp_view", True),
+    ("/onboarding", "quiz_started", True),
+    ("/summary", "quiz_completed", True),
+    ("/preview", "preview_shown", False),
+    ("/checkout", "checkout_viewed", False),
+)
+
+
+def count_page_view(visitor_key: str, path: str, *, redirecting: bool = False) -> None:
+    """Write the funnel step for `path`, if `path` is a funnel step.
+
+    The decision half, split from `track_page_view` so a test can drive the rules directly
+    instead of reconstructing a request. `redirecting` is whether the response was a 1xx or 3xx,
+    which settles the lower steps and deliberately does not settle the landing page.
+
+    Only the surfaces listed above. A POST never reaches here (a submission is what the response
+    tables already record), and neither does a 4xx or 5xx, which the middleware filters: a 404 for
+    a mistyped URL is not a landing page view. `/dashboard`, `/health` and `/dev/*` are member and
+    ops surfaces, not funnel steps, and counting a returning member's dashboard read as an LP view
+    would put the same person in the denominator twice on two different days.
+
+    A 3xx is excluded, except that `lp_view` is still counted when the response bounces, and that
+    one exception is cheap to justify. The landing page is the sheet's denominator, and the
+    arrivals that most need counting, an ad click on a campaign URL, a trailing-slash hop, an A/B
+    dispatcher, are the ones that serve something *and* bounce. Suppressing them would undercount
+    sessions in a way no other column revealed. A redirected lower step stays excluded because
+    there a 3xx either showed nothing or bounced onward to a *different* step, and the second
+    would bill two funnel steps for one screen.
+
+    `/onboarding` needs no help from any of this: it is excluded by name in `NON_PAGE_PATHS`, a
+    bare path rather than a prefix, so `/onboarding/{n}` keeps matching. That is the whole of the
+    entry-hop question. What follows is the wrong answer, recorded because it is tempting: the
+    claim that a browser-less walk reaches each of its twelve question pages as the follow of a
+    redirect, so counting only 200s erases `quiz_started` for every test in the suite. It does not.
+    POSTs never follow their own 302 and GETs follow one only when the caller opts in (both stated
+    in `tests/conftest.py`), so a walk's question pages are twelve separate requests that each
+    land on their own 200. Production redirect chains have the same shape: the app bounces onward,
+    the browser requests the next page as its own request.
+    """
+    matched = matched_step(path)
+    if matched is None or path in NON_PAGE_PATHS:
+        return
+    if redirecting and matched[0] not in REDIRECT_COUNTS_AT:
+        return
+    event, dedupe = matched
+    if dedupe:
+        day = telemetry.day_of(telemetry.utc_now())
+        billing.track(event, visitor_key=visitor_key,
+                      idempotency_key=f"{event}:{visitor_key}:{day}")
+    else:
+        billing.track(event, visitor_key=visitor_key)
+
+
+def track_page_view(request: Request, *, redirecting: bool = False) -> None:
+    """Count one page view, on the path the browser actually asked for.
+
+    Thin over `count_page_view`, which holds the rules.
+
+    Done in middleware rather than in each route for two reasons. The first is coverage: a
+    route that forgets its tracking call reports a zero conversion step forever and looks like a
+    marketing problem rather than a missing line of code. The second is fidelity: `request.url`
+    inside a handler is the handler's mount, and after a forward jump in the quiz the visitor's
+    address bar and the handler's idea of "which page" differ. Middleware sees the request that
+    arrived.
+
+    The funnel's own GETs, and only statuses that could have shown something: the middleware runs
+    this only under 400, so "rendered something" is enforced there rather than in two places.
+    """
+    if request.method != "GET":
+        return
+    count_page_view(get_visitor(request), request.url.path, redirecting=redirecting)
+
+
+#: Paths that share a funnel prefix but are not that step. `/checkout/complete` and
+#: `/checkout/cancelled` are both *after* the card screen, and counting them as checkout views
+#: would inflate the step that the checkout→trial conversion divides by, and `trial_started` is
+#: written on that path, so leaving it in the denominator would divide a numerator by a surface
+#: that already sits past it. `/checkout/start` is a POST in the happy path, so listing it costs
+#: nothing and covers the GET that reaches it.
+#:
+#: `/onboarding` is here for a different reason, and it is the one a reader will want to check
+#: twice. That exact path is the quiz's *entry redirect*: it renders nothing, it answers 302 to
+#: the first unanswered question, and the visit that lands on the bar is the one that follows.
+#: Counting the redirect as a `quiz_started` would charge the step to the hop rather than to the
+#: page, and the hop happens on paths where nobody started anything, so it is excluded while
+#: `/onboarding/{n}` below still matches on its prefix. The test is exact-path for that reason.
+NON_PAGE_PATHS = frozenset({"/checkout/complete", "/checkout/cancelled", "/checkout/start",
+                            "/onboarding"})
+
+
+#: Steps that are still counted when the response was a 1xx or 3xx. See `track_page_view` for
+#: why the landing page is in here and the quiz's entry hop is not.
+REDIRECT_COUNTS_AT = frozenset({"lp_view"})
+
+
+def matched_step(path: str) -> tuple[str, bool] | None:
+    """Which funnel step, if any, this path *is*: `(event_name, count_once_per_visitor_per_day)`.
+
+    Split out of `track_page_view` so the middleware can ask the same question the tracker does
+    without performing the write. Matching is prefix-based on purpose: `/onboarding/7` is the
+    eighth question, not a surface of its own, and a step that matched only its exact path would
+    report a quiz nobody ever finished.
+    """
+    for prefix, event, dedupe in PAGE_EVENTS:
+        if path == prefix or (prefix != "/" and path.startswith(prefix + "/")):
+            return (event, dedupe)
+    return None
+
+
+@app.middleware("http")
+async def telemetry_middleware(request: Request, call_next):
+    """Count a page view once, after the response is known, and never fail the page for it.
+
+    The status *range* decides "showed nothing", not `response.is_redirect`. The object that
+    comes back from `call_next` is starlette's `_StreamingResponse`, what wraps everything
+    downstream of a middleware, and it does not carry the convenience properties the concrete
+    `RedirectResponse` has. A 3xx check works on every response class and on none of them
+    specially, which is the property worth having in code that runs around every request;
+    reaching for `.is_redirect` there cost every funnel page view in this suite, swallowed by
+    the very `except` that is there to keep instrumentation from breaking a page.
+
+    After `call_next` rather than before: the status code is part of the definition of a view
+    (a 404 is not a landing page), and an exception inside the tracker must not become a 500 on
+    a page that rendered fine. `track` already swallows its own errors, so this is belt-and-
+    braces for a failure raised while *computing* the key.
+    """
+    response = await call_next(request)
+    if response.status_code < 400:
+        try:
+            track_page_view(request, redirecting=100 <= response.status_code < 200
+                            or 300 <= response.status_code < 400)
+        except Exception as exc:  # noqa: BLE001 - instrumentation never breaks a page
+            log.warning("telemetry middleware failed on %s: %s", request.url.path, exc)
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -538,8 +697,9 @@ async def checkout_rehearsal(request: Request) -> HTMLResponse:
         return RedirectResponse(url="/checkout", status_code=303)
 
     stored = answers_for(request)
+    visitor_key = get_visitor(request)
     store.append_event(
-        visitor_key=get_visitor(request),
+        visitor_key=visitor_key,
         status="started",
         answers=form_answers(stored),
         step=len(QUESTIONS) + 1,
@@ -547,6 +707,18 @@ async def checkout_rehearsal(request: Request) -> HTMLResponse:
         offer_id=OFFER_ID,
         user_agent=request.headers.get("user-agent", ""),
     )
+    # The funnel's commitment moment, recorded as an event and not only as a response row.
+    # `checkout_complete` is what records it on the live path and this route is what a rehearsal
+    # deployment actually runs, so without this line a rehearsal week reports visitors who
+    # reached a card screen and then committed to nobody. `trials_started` is the denominator of
+    # Trial→Paid, and an empty one makes that ratio blank rather than honest. No payment event
+    # follows, because nothing was captured.
+    billing.track("trial_started", visitor_key=visitor_key,
+                  # Visitor and day, the same key the live path uses, so a visitor who somehow
+                  # crosses both paths on one day is still one committed start.
+                  idempotency_key=f"trial_started:{visitor_key}:"
+                                  f"{telemetry.day_of(telemetry.utc_now())}",
+                  detail={"live": False, "via": "rehearsal"})
     return templates.TemplateResponse(
         request, "rehearsal_done.html",
         page_context(request, copy_obj=build_copy(settings)),

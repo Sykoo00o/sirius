@@ -36,7 +36,9 @@ from typing import Any
 
 import billing_store
 import save_offer
+import storage
 import stripe_billing
+import telemetry
 from billing_store import BillingStore
 from config import FunnelSettings
 from funnel_copy import Copy, build_copy, human_date, iso_to_local_date
@@ -113,11 +115,107 @@ def failure_result(settings: FunnelSettings, error: Any, *,
 
 class BillingService:
     def __init__(self, settings: FunnelSettings, store: BillingStore,
-                 mailer: Mailer, client: stripe_billing.StripeClient | None) -> None:
+                 mailer: Mailer, client: stripe_billing.StripeClient | None,
+                 telemetry: telemetry.TelemetryStore | None = None) -> None:
         self.settings = settings
         self.store = store
         self.mailer = mailer
         self.client = client
+        #: Optional, and optional on purpose. Telemetry is instrumentation, and instrumentation
+        #: that can break a checkout is worse than no instrumentation: a trial that 500s after
+        #: the card was charged is a refund and possibly a dispute. So a service built without a
+        #: store (every Phase 2 call site, and any future one) behaves exactly as before, and
+        #: `track` below swallows its own failures rather than propagating them into a route.
+        self.telemetry = telemetry
+
+    # ---- telemetry ---------------------------------------------------------
+
+    def track(self, event: str, *, visitor_key: str = "", row: dict[str, Any] | None = None,
+              amount_minor: int = 0, gross_volume_minor: int = 0, refunded_minor: int = 0,
+              card_funding: str = "", card_country: str = "", currency: str = "",
+              reference_id: str = "", idempotency_key: str = "",
+              detail: dict[str, Any] | None = None, agent_log: bool = False,
+              agent_message: str = "", agent_level: str = "info") -> bool:
+        """Record one funnel event, and never fail the customer-facing action around it.
+
+        Three decisions worth stating:
+
+        * A missing card funding type is stored as ``unknown`` rather than blank when we are
+          otherwise holding card facts, and stays blank when we hold none. "Not offered" and
+          "offered and unreadable" are different statements, and the prepaid share is a
+          warning indicator whose safe default is unknown, never a guessed ``credit``.
+        * ``offer_id`` is never passed in: it comes from the one variant label this build
+          ships (§3.3: variant identity has nowhere else to live), so a caller cannot invent a
+          cohort by forgetting an argument.
+        * A write that raises logs one warning and returns False. Every call site here sits
+          after a state change that has already succeeded, and a broken metrics row is not a
+          reason to tell a customer their cancellation failed.
+        """
+        if self.telemetry is None:
+            return False
+        subscription = row or {}
+        funding = card_funding or ("unknown" if subscription.get("card_last4") else "")
+        try:
+            written = self.telemetry.record(
+                event=event,
+                visitor_key=visitor_key or subscription.get("visitor_key", ""),
+                test_variable=storage.OFFER_ID,
+                amount_minor=amount_minor,
+                gross_volume_minor=gross_volume_minor,
+                refunded_minor=refunded_minor,
+                card_funding=funding,
+                card_country=card_country or subscription.get("card_country", ""),
+                currency=currency or subscription.get("currency") or self.settings.currency,
+                reference_id=reference_id,
+                idempotency_key=idempotency_key,
+                detail=detail or {},
+            )
+            if agent_log:
+                self.telemetry.log(
+                    event=event, message=agent_message or f"funnel event {event}",
+                    level=agent_level,
+                    context={"visitor_key": visitor_key or
+                             subscription.get("visitor_key", ""),
+                             "reference_id": reference_id,
+                             "amount_minor": amount_minor,
+                             **(detail or {})},
+                    idempotency_key=f"log:{idempotency_key}" if idempotency_key else "",
+                )
+            return written
+        except Exception as exc:  # noqa: BLE001 - telemetry must never break a purchase
+            log.warning("telemetry %s failed: %s", event, exc)
+            return False
+
+    def holds_test_keys(self) -> bool:
+        """Whether this app is armed with *test* keys, deciding that from the widest evidence it has.
+
+        The three mode-mismatch guards all asked `self.client is not None and
+        self.client.keys.key_type == "test"`, which is a fair question to ask of a client and a bad
+        way to answer "would a live event be someone else's money". A client is a request
+        transport, and a service built without one, which is every rehearsal construction and the
+        state after a key is withdrawn without a restart, reported False: not "we hold live keys"
+        but "the question did not apply". The consequence is the one that matters, because the
+        guards are what keep another merchant account's disputes out of our 1% ceiling, and a
+        rehearsal app answering False let a live-mode event through and *counted it*.
+
+        So: no client answers True outright, and with a client, its own keys. The absent-client case
+        is True because of which question is being asked. "Would a live-mode event be somebody
+        else's money?" is answered by *this lane's* configuration, and an app with no client cannot
+        take money from anybody, so every live event it is handed is by definition another account's.
+        The alternative, the one this function replaced, answered False whenever `client` was None,
+        which reads as though the guard had inspected the keys and found them live. It had inspected
+        nothing, and every rehearsal app in the fleet had that answer, so the one configuration
+        mistake this guard exists to catch, a webhook wired at the wrong merchant account, arrived
+        at a rehearsal app and was counted as ours.
+
+        `getattr(..., "test")` on the client's own keys is the same reasoning one level down. A
+        client built without readable keys is not evidence of a live lane, and the cost of guessing
+        "test" is one extra log line during a misconfiguration, while the cost of guessing "live" is
+        a foreign dispute inside the 1% ceiling that closes accounts.
+        """
+        if self.client is None:
+            return True
+        return getattr(getattr(self.client, "keys", None), "key_type", "test") == "test"
 
     @property
     def live(self) -> bool:
@@ -276,6 +374,36 @@ class BillingService:
         # is the one that drops a disclosure to avoid a duplicate.
         self.store.clear_notification(row["visitor_key"], "trial_receipt")
         self.send_trial_receipt(row)
+        # Two events, because the sheet computes two different ratios from them and a single
+        # row cannot serve both.
+        #
+        # `trial_started` is keyed per visitor *and day*, which is what makes the browser
+        # redirect and the `checkout.session.completed` webhook collapse into one row. It cannot
+        # be keyed on the session id, as the mirror-image `trial_paid` below is: the two paths
+        # hold different identifiers for the same commitment (the return carries the session id,
+        # the webhook's subscription lookup resolves to the subscription), so a session-scoped
+        # key let the same person be counted as two committed starts. That is not a rounding
+        # error, it is a factor of two on the denominator of Trial→Paid, and it read as a funnel
+        # converting half as well as it was.
+        #
+        # A genuinely second trial is unaffected, because it is a second day. A visitor who
+        # completes twice inside one UTC day is one committed start in the sheet, which agrees
+        # with the column's own definition (`trials_started` counts distinct visitors) and with
+        # the fact that the trial is once per person; `trial_paid` still records both, because
+        # two captures are two pieces of money whatever the cohort says.
+        card = stripe_billing.card_of_object(subscription)
+        self.track("trial_started", row=row, reference_id=session_id,
+                   card_funding=card["funding"], card_country=card["country"],
+                   idempotency_key=f"trial_started:{visitor_key}:"
+                                   f"{telemetry.day_of(telemetry.utc_now())}",
+                   detail={"live": self.live})
+        if self.live:
+            self.track("trial_paid", row=row, reference_id=session_id,
+                       amount_minor=self.settings.trial_amount_minor,
+                       gross_volume_minor=self.settings.trial_amount_minor,
+                       card_funding=card["funding"], card_country=card["country"],
+                       idempotency_key=f"trial_paid:{session_id or visitor_key}",
+                       detail={"via": "checkout"})
         return row
 
     def send_trial_receipt(self, row: dict[str, Any]) -> list[Any]:
@@ -363,6 +491,14 @@ class BillingService:
         )
         access = self.access_until(updated_row)
         self.send_cancellation(updated_row, access_until=access)
+        # Keyed on the cancellation timestamp, which is the one thing that distinguishes this
+        # cancel event from a later one by the same member. A double click on the button is the
+        # case the key exists for: `cancel_now` returns "already cancelled" on the second
+        # visit and never reaches here, so the count is one per real cancel event.
+        self.track("cancel_clicked", row=updated_row,
+                   idempotency_key=f"cancel_clicked:{visitor_key}:"
+                                   f"{updated_row.get('cancelled_at', '')}",
+                   detail={"live": self.live})
         return CancelResult(
             done=True,
             headline="Cancelled. Nothing more will be charged.",
@@ -496,6 +632,14 @@ class BillingService:
             fields["paused_until"] = ""
         self.store.upsert_subscription(visitor_key=visitor_key, **fields)
         self.store.log_event(visitor_key=visitor_key, event=outcome.event, applied=True)
+        # One telemetry name for all three retention offers, because the Day-1 sheet counts
+        # "saves taken" as one number and §3.2 test 6 compares saves against confirmed cancels.
+        # The spec's own per-option name stays in `detail` so a drill-down is still one filter
+        # away rather than a re-run of the funnel.
+        self.track("save_offer_selected", row=row,
+                   idempotency_key=f"save_offer_selected:{visitor_key}:"
+                                   f"{outcome.event}:{billing_store.utc_now()}",
+                   detail={"offer_event": outcome.event, "key": key})
         if key in save_offer.REVVERSIBLE:
             updated = self.store.get_subscription(visitor_key) or row
             self.send_cancellation(updated, access_until=self.access_until(updated),
@@ -587,6 +731,13 @@ class BillingService:
         """Optional, never blocking (§2.3). Stored under the spec's own event name."""
         self.store.log_event(visitor_key=visitor_key, event="survey_reason",
                              reason=reason, note=note[:500])
+        # Deliberately *not* idempotent on a key: the spec calls the survey two questions, and
+        # a member who submits both in two posts is two legitimate rows in the response table
+        # while the funnel event remains "they gave us the reason". `survey_submitted` feeds
+        # the completion ratio (surveys / cancels), where a double submit is real noise worth
+        # seeing rather than a duplicate to hide.
+        self.track("survey_submitted", visitor_key=visitor_key,
+                   detail={"reason": reason, "note": note[:200]})
 
     def access_until(self, row: dict[str, Any]) -> str:
         """Day-level "until when do I keep this", spelled out.
@@ -623,6 +774,104 @@ class BillingService:
                 cancel_url=f"{self.settings.public_url}/account/cancel")]))
         return results
 
+    def _track_rebill_decline(self, row: dict[str, Any], summary: dict[str, Any]) -> None:
+        """Record a failed rebill, and the day the +3 retry is spent.
+
+        The mailer already refuses a second decline notice via a per-period dedupe marker.
+        Telemetry needs the same judgement expressed in *dates* rather than in markers, because
+        the rule is calendar-shaped (§2.1: one retry at day +3, then stop) and because the
+        export has to report the unrecoverable ones distinctly: a decline the retry recovered
+        and a decline that ended the subscription are two very different losses, and the
+        sheet's `rebill_declines_silent` reads as dunning aggressiveness only if it means one
+        of them consistently.
+
+        The anchor is the subscription's period end, not "now". A decline webhook that arrives
+        hours after the charge attempt, or a replay of one, still describes the same period,
+        so the retry deadline does not drift with delivery time. If that anchor is gone, an
+        event already counted for this period suppresses a second one; otherwise the row's
+        creation date is the fallback anchor.
+
+        Two readings of the event object settle this rather than any docstring, and they disagreed
+        in a way that decided the implementation. The first draft treated `attempted` plus "we have
+        an email on file" as proof the processor had already spent our retry, which made every
+        replayed failure a churn. That reading was wrong about the world, and its own comment said
+        the thing it should have noticed: Stripe's smart-dunning ladder is hours and days, not our
+        calendar days, so `attempted` and `attempt_count` describe *its* retries and say nothing
+        about the +3 we owe. A payment provider cannot be the authority on our deadline; only our
+        clock can, which is what `period_end + 3d <= today` says, and it needs no cooperation from
+        the payload.
+
+        `attempt_count >= 2` survives as a floor rather than a trigger, and not for legibility. The
+        export is run daily and the deadline reads as crossed at the first hour past midnight, so
+        without a floor an invoice whose retry is due today and fails this morning is booked as a
+        loss the same morning, while a duplicate event delivered three days late is booked as a
+        loss that happened *today*. Two attempts is the cheapest fact that distinguishes a period
+        we tried twice inside from a period still inside the window, and it never guesses on the
+        first notice of a failure.
+
+        `charge_settled` is the one place the payload is trusted outright. A failure event for an
+        invoice that has since settled carries the settled charge, and an old period plus money in
+        is Stripe catching up on news we already have: calling it terminal would report a loss on a
+        member still paying. `paid` alone proves nothing on a failure webhook, since a failed
+        attempt's own charge is unpaid by definition, and `charge_id` alone survives on payloads
+        that merely name an intent, so it takes the pair.
+        """
+        period_iso = epoch_to_iso(summary.get("current_period_end") or 0)
+        marker = f"decline:{period_iso or summary['id']}"
+        already_noticeable = bool(row.get("email")) and period_iso
+        # `mark_notification_sent` is asked only of a row that could actually be mailed about,
+        # so a row with no email does not burn the marker a later, better-informed event
+        # would need. The return value is kept purely to *report* whether this decline could be
+        # mailed about for the period, and is deliberately not part of the terminal test below:
+        # on a row with no email the marker is never written, so a replay of a mail-less decline
+        # keeps reporting itself as first, and a terminal test built on it would fire on the
+        # second of thirty retries. Stated in code as an unused-by-the-rule value, because the
+        # first version of this read it as "was this the first failure" and that assumption is
+        # exactly what faked a churn on every replay.
+        self.notice_marker_was_new = self.store.mark_notification_sent(
+            visitor_key=row["visitor_key"], kind=marker) if already_noticeable else False
+        anchor = period_iso or row.get("created_at", "")
+        retry_due = f"{anchor[:10]}+{self.settings.decline_retry_days}d"
+        # Deadline arithmetic in dates, not epochs: the policy is written in calendar days, and
+        # comparing a stale test fixture's period end against "now minus 3 days" is how a
+        # replayed decline becomes a false loss.
+        cutoff = (datetime.now(timezone.utc)
+                  - timedelta(days=self.settings.decline_retry_days)).date().isoformat()
+        aged_out = bool(anchor[:10] and anchor[:10] <= cutoff)
+        # A failure event for an invoice that has *since* settled is news we already have, and it
+        # says so by carrying the settled charge: `paid` alone means nothing on a failure webhook
+        # because a failed attempt's own charge is unpaid by definition, and `charge_id` alone
+        # survives on a Radar-style payload that names an intent. Requiring the pair, and
+        # requiring it only against an aged-out period, is what keeps a same-day retry storm from
+        # reading as thirty lost members while a genuinely expired invoice still lands.
+        charge_settled = bool(summary.get("paid")) and bool(summary.get("charge_id"))
+        terminal = aged_out and int(summary.get("attempt_count") or 0) >= 2 and not charge_settled
+        self.track("rebill_declined", row=row,
+                   amount_minor=int(summary.get("amount_total") or 0),
+                   currency=summary.get("currency") or self.settings.currency,
+                   reference_id=str(summary.get("charge_id") or summary["id"]),
+                   idempotency_key=f"rebill_declined:{summary['id']}",
+                   detail={"retry_on": retry_due, "period_end": period_iso,
+                           "notice_sent": self.notice_marker_was_new,
+                           "attempted": bool(summary.get("attempted")),
+                           "attempt_count": int(summary.get("attempt_count") or 0),
+                           "aged_out": aged_out, "terminal": terminal})
+        if terminal:
+            # One row per subscription *period*, not per event id: Stripe may send several
+            # failure events for a period it has given up on, and the sheet counts losses.
+            self.track("rebill_decline_terminal", row=row,
+                       amount_minor=int(summary.get("amount_total") or 0),
+                       currency=summary.get("currency") or self.settings.currency,
+                       reference_id=str(summary.get("charge_id") or summary["id"]),
+                       idempotency_key=f"rebill_terminal:{row['visitor_key']}:"
+                                       f"{period_iso or summary['id']}",
+                       detail={"retry_on": retry_due, "period_end": period_iso,
+                               "attempt_count": int(summary.get("attempt_count") or 0)},
+                       agent_log=True, agent_level="warning",
+                       agent_message=f"rebill for {row['visitor_key']} exhausted the "
+                                     f"one-retry policy and was not recovered")
+        return None
+
     def record_decline(self, row: dict[str, Any]) -> list[Any]:
         """One retry at day +3, then stop (§2.1). The email names the date so the customer
         knows the difference between "we are still trying" and "we gave up"."""
@@ -633,6 +882,147 @@ class BillingService:
                  + timedelta(days=self.settings.decline_retry_days)).date()
         return self.mailer.send_all([decline_email(
             self.copy(row), email=email, retry_on=human_date(retry))])
+
+    # ---- risk signals (refunds, disputes, Radar warnings) -------------------
+
+    def account_signal(self, summary: dict[str, Any], row: dict[str, Any] | None,
+                       event: dict[str, Any] | None = None) -> str:
+        """Count one processor risk signal, and return a reason for the log.
+
+        `event` is the whole webhook body, and it is *optional* for the worst reason: this is the
+        only branch that reads the raw payload rather than the reduced `summary`, because
+        `is_fraud_warning` works on the Radar signal object's own fields (`fraud_reporting`,
+        `dispute`, the advisory taxonomy), which `event_from_webhook` deliberately does not copy
+        into the summary. Reduced shapes lose information on purpose, and a caller that reaches
+        here with a summary alone cannot ask a question the reduction threw away. That is exactly
+        the trap: this branch read `event.get("data")` while `event` was still an unset local, so
+        any Radar warning raised `UnboundLocalError` on the way in, which on a webhook is a 5xx,
+        which Stripe retries forever, which means the one signal the ≤ 0.5% fraud ceiling is made
+        of never landed and the ceiling read zero forever. Hence the parameter rather than a
+        capture: the summary carries no raw object to fall back to, and inventing one here would
+        let a caller believe a fraud question had been answered when nothing was inspected.
+
+        These three event families are the reason this function exists at all. §3.3 is blunt
+        about it: fraud-not-chargeback is neither a dispute nor a chargeback, no table holds
+        it, and a lane can pass every visible metric while being disqualified on the one ratio
+        that actually closes merchant accounts. Counting it starts with writing a row.
+
+        The ratio denominators are set here rather than at the export, and each signal writes
+        the *charge's* captured amount into `gross_volume_minor`: §3.4's dispute formula
+        divides by authorised volume, not by revenue we kept, and a dispute on a charge we
+        never captured is a dispute on volume we never authorised.
+
+        `trial_paid` is backfilled when a refund or a dispute arrives for a subscription whose
+        conversion we somehow never recorded (a charge made in the dashboard, an outage during
+        checkout). It is keyed on the subscription rather than the session id, so a real
+        earlier row wins and this fills only the hole. Without it, refund % divides by a
+        smaller paid count and reports a healthier number than the truth.
+
+        Nothing here is gated on a local email, a readable date, or a known card. All three
+        have been absent on events that mattered, and a risk signal we only count when the
+        payload was friendly is a ratio biased towards the safe-looking events.
+        """
+        event_type = summary["type"]
+        # The two-stack lesson from §3.4: one rollup per lane, and a number from the wrong
+        # merchant account in our rollup is worse than a gap. A live-mode event while we hold
+        # test keys means that account's disputes and refunds are not our disputes and
+        # refunds, so they are recorded as one named, countable anomaly and kept out of every
+        # ratio. Guarded here rather than only in `handle_event` so the rule cannot be walked
+        # past by a caller that reaches the helper directly, which is what the two call sites
+        # above would otherwise do differently from each other.
+        if summary.get("live_mode") and self.holds_test_keys():
+            logged = (self.telemetry.log(
+                event="mode_mismatch_event", level="warning",
+                message=f"live-mode {event_type} received while holding test keys",
+                context={"stripe_event": summary["id"],
+                         "signal_id": summary.get("signal_id", ""),
+                         "charge_id": summary.get("charge_id", "")},
+                idempotency_key=f"mode_mismatch:{summary['id']}",
+            ) if self.telemetry is not None else False)
+            return f"mode-mismatch:{'logged' if logged else 'already-known'}:{event_type}"
+        if event_type.startswith("charge.dispute"):
+            if event_type != "charge.dispute.created":
+                # `charge.dispute.updated`/`.closed` changes who holds the money, not whether
+                # a dispute happened. It already landed in the 1% numerator on creation, so
+                # recounting here would double-count the same cardholder complaint.
+                return f"dispute-{event_type.rsplit('.', 1)[-1]}:counted-at-creation"
+            event, level = "dispute_created", "warning"
+            message = (f"dispute {summary.get('signal_id') or summary['id']} opened on "
+                       f"charge {summary.get('charge_id') or 'unknown'}")
+        elif event_type.startswith("radar."):
+            if not stripe_billing.is_fraud_warning(
+                    (event or {}).get("data", {}).get("object", {}) or {}):
+                # Radar advice that does not name fraud (`generic_complaint`,
+                # `product_unsatisfactory`) is not the ≤ 0.5% numerator, and counting it would
+                # trip the kill switch on the wrong signal. Logged, not counted.
+                return "radar-warning:not-fraud-flagged"
+            event, level = "radar_early_warning", "warning"
+            message = (f"Radar early warning {summary.get('signal_id') or summary['id']} "
+                       f"({summary.get('warning_reason') or 'reason not given'})")
+        elif event_type == "charge.refunded":
+            event, level = "refund_issued", "info"
+            message = (f"refund of {summary.get('amount', 0)} minor units on charge "
+                       f"{summary.get('charge_id') or 'unknown'}")
+        else:
+            return f"signal:unhandled:{event_type}"
+
+        # Keyed on the event's own identity, which is exactly what Stripe re-delivers. A
+        # redelivered dispute must not count twice against a 1% ceiling.
+        key = f"{event}:{summary['id']}"
+        captured = int(summary.get("amount_captured") or 0)
+        amount = int(summary.get("amount") or 0)
+        counted = self.track(
+            event, row=row,
+            visitor_key=(row or {}).get("visitor_key", "") or summary["visitor_key"],
+            amount_minor=amount,
+            gross_volume_minor=captured or amount,
+            refunded_minor=amount if event == "refund_issued" else 0,
+            card_funding=summary.get("card_funding", ""),
+            card_country=summary.get("card_country", ""),
+            currency=summary.get("currency") or self.settings.currency,
+            reference_id=summary.get("charge_id", "") or summary.get("signal_id", ""),
+            idempotency_key=key,
+            detail={"stripe_event": summary["id"], "event_type": event_type,
+                    "signal_id": summary.get("signal_id", ""),
+                    "subscription_id": summary.get("subscription_id", ""),
+                    "dispute_status": summary.get("dispute_status", "")},
+            agent_log=True, agent_message=message, agent_level=level,
+        )
+        if row is None:
+            # Counted regardless: the row's absence is a bookkeeping gap, not a reason to
+            # unsee a dispute. Named in the reason string so the log says which happened.
+            log.warning("webhook %s has no local subscription row (%s); counted anyway",
+                        event_type, summary.get("subscription_id") or "no subscription id")
+        if event != "refund_issued" or row is None or not row.get("subscription_id"):
+            return f"{event}:{'counted' if counted else 'duplicate'}"
+        self.track("trial_paid", row=row,
+                   idempotency_key=f"trial_paid:{row['subscription_id']}",
+                   amount_minor=int(row.get("trial_amount_minor") or 0),
+                   gross_volume_minor=int(row.get("trial_amount_minor") or 0),
+                   detail={"via": "backfill"})
+        return f"{event}:{'counted' if counted else 'duplicate'}"
+
+    def _track_expiry(self, summary: dict[str, Any], row: dict[str, Any] | None) -> None:
+        """Count the conversion a Checkout session that lapsed represents.
+
+        A counted event, not an anomaly line, for one reason: `trials_started` in the export is
+        derived from rows, so an abandoned checkout must appear in the denominator or the
+        Trial→Paid percentage is computed over conversions only and always reads optimistic.
+        Keyed on the session id, which makes a redelivered expiry one row. Recorded whatever
+        the local row looks like, because `handle_event` deliberately leaves a `trialing` row
+        *alone* on a late expiry (the charge really happened, the notice is Stripe catching up)
+        and a telemetry row that mirrored that choice would silently drop the abandonment for
+        the exact race where a visitor retried.
+        """
+        self.track("checkout_expired", row=row,
+                   visitor_key=(row or {}).get("visitor_key", "") or summary["visitor_key"],
+                   amount_minor=int(summary.get("amount_total") or 0),
+                   card_funding=summary.get("card_funding", ""),
+                   card_country=summary.get("card_country", ""),
+                   reference_id=str(summary.get("charge_id") or ""),
+                   idempotency_key=f"checkout_expired:{summary.get('charge_id') or summary['id']}",
+                   detail={"stripe_event": summary["id"],
+                           "kept_row": bool(row and row.get("status") == "trialing")})
 
     # ---- webhook -----------------------------------------------------------
 
@@ -649,7 +1039,33 @@ class BillingService:
             "checkout.session.completed", "checkout.session.expired",
             "invoice.payment_failed", "invoice.paid",
         )
+        # Risk signals take their own path, before the row-matching below and before the
+        # ignore-list. Three reasons, all load-bearing: a Radar warning has no subscription at
+        # all (so the row matcher would drop it as `unmatched`), a dispute for a subscription we
+        # never saw is precisely the event we cannot afford to discard, and the ignore-list
+        # below answers `ignored:` with no side effect, which is the opposite of what a kill
+        # metric needs.
+        if (event_type.startswith("charge.dispute") or event_type.startswith("radar.")
+                or event_type == "charge.refunded"):
+            if summary["live_mode"] and self.holds_test_keys():
+                # Counted in the shared helper, whose mode guard holds on every path, and the
+                # origin is named in the reason so the log distinguishes "another account's
+                # event" from "an event we do not use".
+                self.account_signal(summary, None, event)
+                return f"ignored:test-mode-account-mismatch:{event_type}"
+            signal_row = ((self.store.get_subscription(summary["visitor_key"])
+                           if summary["visitor_key"] else None)
+                          or self._by_subscription(summary["subscription_id"]))
+            return self.account_signal(summary, signal_row, event)
         if event_type == "checkout.session.expired":
+            # Matched here rather than by the block below, which this branch returns from
+            # before reaching it. An expiry is the one event type this handler acts on for a
+            # visitor it has never seen (`expired:no-row`), so it needs a row lookup of its own
+            # and cannot borrow one, and the lookup is cheap enough to do twice rather than
+            # hoisted above the risk-signal branch that does not want it.
+            row = ((self.store.get_subscription(summary["visitor_key"])
+                    if summary["visitor_key"] else None)
+                   or self._by_subscription(summary["subscription_id"]))
             # Nobody pays for an expired session, so the row is marked for cleanup and the
             # dashboard must not offer a plan because of it. `trialing` rows are left alone:
             # an expiry notice that arrives *after* a successful complete is Stripe catching up,
@@ -657,12 +1073,20 @@ class BillingService:
             # member out of the plan they bought.
             if row is not None and row.get("status") != "trialing":
                 self.store.upsert_subscription(visitor_key=row["visitor_key"], status="canceled")
+                self._track_expiry(summary, row)
                 return "expired:marked"
+            self._track_expiry(summary, row)
             return "expired:left-alone"
         if not event_type.startswith("customer.subscription.") and event_type not in known:
             return f"ignored:{event_type}"
-        if summary["live_mode"] and self.client is not None and \
-                self.client.keys.key_type == "test":
+        if summary["live_mode"] and self.holds_test_keys():
+            # Logged as a signal *before* returning. This is the one ignored path that must
+            # not be silent: a live-mode event while we hold test keys means another account
+            # is taking this funnel's money, which is a dispute against a descriptor this app
+            # never set. Counting it keeps that visible even when it arrives as a flood, and
+            # the idempotency key is the Stripe event id, so it is one row per event either
+            # way, never an unbounded log line under retry pressure.
+            self.account_signal(summary, None)
             return f"ignored:test-mode-account-mismatch:{event_type}"
 
         visitor_key = summary["visitor_key"]
@@ -719,6 +1143,7 @@ class BillingService:
         if event_type == "invoice.payment_failed":
             fields["status"] = "past_due"
             self._apply(row, fields)
+            self._track_rebill_decline(row, summary)
             # The grace retry is one retry (§2.1), so the decline mail is one mail. The
             # marker is keyed on the period end rather than a bare kind: a later decline, in
             # a later period, is a different event and gets its own notice.
@@ -736,6 +1161,22 @@ class BillingService:
             if not row.get("subscription_id") and subscription_id:
                 fields["subscription_id"] = subscription_id
             self._apply(row, fields)
+            # Only a *rebill* is a rebill. `checkout.session.completed` already counts the
+            # trial capture as `trial_paid`, and counting the same invoice here too would let
+            # one $1 trial appear as a conversion twice, which inflates both the paid count and
+            # the authorised volume it divides by. A trial invoice carries no `period_end`
+            # transition we care about; a rebill always names the period it just bought.
+            period_end_iso = epoch_to_iso(summary["current_period_end"])
+            if period_end_iso and period_end_iso != row.get("current_period_end", ""):
+                self.track("rebill_succeeded", row=row,
+                           amount_minor=int(summary.get("amount_total") or 0),
+                           gross_volume_minor=int(summary.get("amount_total") or 0),
+                           currency=summary.get("currency") or self.settings.currency,
+                           reference_id=str(summary.get("charge_id") or subscription_id),
+                           idempotency_key=f"rebill_succeeded:"
+                                           f"{summary.get('charge_id') or summary['id']}",
+                           detail={"previous_period_end": row.get("current_period_end", ""),
+                                   "stripe_event": summary["id"]})
             # Stop advertising the discounted price once the processor says the promotion has
             # run out, judged on the coupon's *own* end date rather than on how many invoices
             # we have seen. A member who resumed from a pause or was charged early would

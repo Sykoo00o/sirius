@@ -126,28 +126,62 @@ stripe_billing = _LiveStripeBilling("stripe_billing")
 # A recording Stripe
 # ---------------------------------------------------------------------------
 class PinAttribute:
-    """A class attribute that accepts one value and refuses every other.
+    """A class attribute that accepts one value, and the disarmed value, and refuses every other.
 
     Used to pin `BillingService.client` to the recorder one test armed. Plain `monkeypatch.setattr`
     would freeze the value but not the assignment, so the app's own `billing.client =
     billing_client()` would sail through and the test's double would silently stop being the object
     under test. Raising at the assignment names the line that broke the arrangement, instead of
     leaving a later assertion to report an empty call list with no cause.
+
+    `disarm()` is the escape hatch, not `None` accepted unconditionally. `None` means "this funnel
+    cannot reach the processor" to every gate in `billing` and `main`, so a test of that posture, a
+    live-mode event arriving with no usable client, or the rehearsal banner, has to be able to stand
+    in it. But the app re-arms on several routes, and an unconditional pass-through is not strong
+    enough to tell "this test asked for the disarmed state" from "the app's own re-arm quietly put
+    the recorder back and this test is now asserting against a client it never configured", which is
+    the exact confusion the pin exists to catch. A test that wants the disarmed state calls
+    `disarm()`; everybody else still gets the raise.
+
+    Disarming inverts what is pinned rather than adding a tolerated value on the side: once
+    disarmed, the recorder itself is refused, and any attempt to put it back raises. That direction
+    matters more than it looks. A descriptor that tolerates `None` *and* returns the recorder keeps
+    a disarmed app serving requests through the double, so the "we hold no client" scenario is
+    tested against a client that is present, and the test passes for the wrong reason while proving
+    the opposite of what it says.
     """
 
     def __init__(self, value) -> None:
         self.value = value
+        self.disarmed = False
+
+    def disarm(self) -> None:
+        """Pin the disarmed posture: `None` in, and the recorder refused from here on."""
+        self.disarmed = True
+
+    def rearm(self) -> None:
+        """Back to the recorder-only arrangement this fixture installed."""
+        self.disarmed = False
 
     def __get__(self, _obj, _owner=None):
-        return self.value
+        # The stored value, always, and *not* a read back through the instance: `obj.__dict__` is
+        # where this descriptor's `__set__` puts nothing, so a "read the instance first" version
+        # here looked more correct, returned the recorder to a test that had just disarmed it, and
+        # turned the raise into an assertion 20 lines later.
+        return None if self.disarmed else self.value
 
     def __set__(self, _obj, value):
-        if value is not self.value:
+        wanted = None if self.disarmed else self.value
+        if value is not wanted:
             raise AssertionError(
-                "something replaced the armed Stripe double mid-test, so the recorder this test "
-                f"configured is not the client answering requests: got {type(value).__name__}. "
-                "`main` re-arms through `billing_client()`; a route that builds a client some other "
-                "way needs its own test rather than swapping this one's double.")
+                "something replaced the client this test pinned, so the object answering requests "
+                f"is not the one under test: got {type(value).__name__}, pinned "
+                f"{'None (disarmed)' if self.disarmed else type(self.value).__name__}. "
+                "`main` re-arms through `billing_client()`; a test that wants the disarmed posture "
+                "says so with `client.pin.disarm()` rather than assigning over the double, and a "
+                "route that builds a client some other way needs its own test.")
+
+
 
 
 class FakeStripe(stripe_billing.StripeClient):
@@ -597,15 +631,78 @@ def live(tmp_path, monkeypatch):
     # None, no key -> None) is not lost: `test_charges_on_but_no_key_still_boots_and_keeps_the_two_nos_apart`
     # and the config tests above cover both branches directly, which is where they are cheap to
     # test, rather than by leaving the app free to replace its own double mid-test.
-    def _arm(*_ignored, **_kwargs):
-        main.billing.client = recorder
-        return recorder
+    def _arm(disarm: bool | None = None, *_ignored, **_kwargs):
+        """What the app's re-arming routes call. Reads the *posture*, and normally hands back the
+        recorder.
+
+        `disarm=None` means "nobody told me", which is every real route, and the answer then comes
+        from the same place production's answer would come from: `client_for`'s own gating on the
+        live environment. A test that removes the funnel key is therefore answered `None` by the
+        next request, which is what a key withdrawn without a restart does, and a test that puts one
+        back is armed again. `disarm=True`/`False` overrides it for a test that wants the posture
+        asserted rather than derived.
+
+        Reading the environment rather than returning a constant is the part the first version got
+        wrong. It answered `recorder` no matter what, so every "we hold no key" path in the app was
+        measured with a client present, and a live-mode event arriving at a rehearsal app looked
+        handled because a fixture refused to let the app be in the state the test claimed.
+        """
+        if disarm is None:
+            # The gating the real factory applies, against the real environment, so this stays a
+            # mirror of production rather than a stub that happens to be convenient. Both of the
+            # app's two no's have to be here, and reading only the key misses the one this suite
+            # leans on hardest: `client_for` also returns None for a configured lane with
+            # `FUNNEL_CHARGES_ENABLED=false`, and a fixture that ignored that armed a recorder for
+            # an app production says must not reach Stripe at all. Calling `client_for` rather than
+            # reimplementing its conditions is the version that cannot drift from it.
+            disarm = fresh.client_for(main.settings) is None
+        (pin.disarm() if disarm else pin.rearm())
+        return None if disarm else recorder
 
     monkeypatch.setattr(main, "billing_client", _arm)
     # Set on the class directly rather than through `monkeypatch`, because `client` is an instance
     # attribute and monkeypatch would refuse to set a class attribute it cannot find. The teardown
     # below deletes it again, which puts every instance back to reading its own `__dict__`.
-    type(main.billing).client = PinAttribute(recorder)
+    #:
+    #: Held in a local and reached from `_arm` through the closure, *not* re-read as
+    #: `type(main.billing).client` inside `_arm`. A data descriptor lives on the class and
+    #: `type(instance).attr` goes through `__get__` like any other read, so that expression hands
+    #: back the pinned *client* and not the descriptor, and a helper written to flip the pin instead
+    #: asked a `FakeStripe` for `.disarm()`. Two names for one object, and this one is the truth.
+    pin = PinAttribute(recorder)
+    type(main.billing).client = pin
+
+    #: The recorder, for a test that needs to name the double rather than reach it through
+    #: `client.fake()`; and `client.disarm()`, which flips this app into the no-processor posture
+    #: the pin would otherwise refuse. See `PinAttribute.disarm`.
+    client.recorder = recorder
+
+    def _arm_client():
+        """Refresh this app's client the way the re-arming routes do, and hand it back.
+
+        Derived from the environment, so a test that removed the funnel key gets `None`, one that
+        turned charges off gets `None`, and one that restored either is armed again. Calling this is
+        what makes a posture a *state the app is in* rather than a value a test wrote once: the
+        webhook route re-arms on the way in, so anything the test assigned by hand is gone by the
+        first request, and an assertion afterwards measures an app that no longer matches the test's
+        premise.
+
+        A test may still ask for a posture outright with `client.disarm()` / `client.arm()`, which
+        pass the flag explicitly. Prefer the derived call: it fails when the gating changes instead
+        of papering over it.
+        """
+        main.billing.client = main.billing_client()
+        return main.billing.client
+
+    client.refresh_client = _arm_client
+
+    def _set_posture(disarm: bool):
+        main.billing_client(disarm=disarm)
+        main.billing.client = None if disarm else recorder
+        return main.billing.client
+
+    client.disarm = lambda: _set_posture(True)
+    client.arm = lambda: _set_posture(False)
 
     client.fake = lambda: recorder
     client.main = main

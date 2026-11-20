@@ -29,8 +29,13 @@ APP_MODULE_KEY = "_app_module"
 #: and a rebinding loop all need the identical list, and a module added to the app's import tree
 #: but named in only one of the three skips its teardown: the next app then inherits the previous
 #: one's module-level state and passes a test the configuration never earned.
+# Every module whose state a rebuilt app can inherit. A module missing from this list keeps its
+# previous import, so a fixture can end up holding a store that belongs to a finished test's
+# `tmp_path`: the writes land, the assertions pass, and nothing is being tested. `telemetry` was
+# added with Phase 3 for exactly that reason, and `quiz` because `storage` reads variant
+# identity through it, so a stale copy reports a stale `test_variable` on every event row.
 PHASE2_MODULES = ("main", "config", "storage", "session", "billing", "billing_store",
-                  "mailer", "funnel_copy", "stripe_billing", "save_offer")
+                  "mailer", "funnel_copy", "stripe_billing", "save_offer", "telemetry", "quiz")
 RAISED_KEY = "_raised"
 _URLENCODED = "application/x-www-form-urlencoded"
 
@@ -159,8 +164,11 @@ def attach(client: TestClient, app_module=None, stripe_module=None) -> TestClien
             headers.setdefault("cookie", f"{name}={value}")
         # POSTs must not follow their own 302: a client that follows it issues a GET to the
         # next step and throws the body away, so every answer looks accepted while none saved.
-        if method.upper() != "GET":
-            kwargs["follow_redirects"] = kwargs.get("follow_redirects", False)
+        # GETs are pinned to the same answer deliberately. `TestClient.get` follows redirects by
+        # default and `httpx.Client.get` does not, so leaving the flag unset here meant the two
+        # spellings of `client.get("/onboarding")` in the same suite reached different numbers of
+        # pages and recorded different funnel steps. Stated once, in one direction, for every verb.
+        kwargs["follow_redirects"] = kwargs.get("follow_redirects", False)
 
         # The module swap that makes the registration true, and it has to be here rather than
         # left to the fixture. Two apps are alive in a run that borrows both billing fixtures,
@@ -205,6 +213,21 @@ def attach(client: TestClient, app_module=None, stripe_module=None) -> TestClien
 
     client.request = request  # type: ignore[method-assign]
     return client
+
+
+def get(client: TestClient, path: str, **kwargs):
+    """GET with follow-redirects off, stated at the call rather than inherited from httpx.
+
+    GET is where `attach` leaves the flag alone (its POST note below explains why POSTs must not
+    follow), and the default is not the same in the two clients this suite drives: the ASGI
+    transport behind `TestClient.get` follows redirects, the plain `httpx` request through
+    `client.request` does not. Same call, same app, different number of funnel steps reached, and
+    telemetry was the thing that noticed, counting one hop as a whole quiz start. Every test that
+    wants *this* response uses this helper; a test that means to ride the chain to the end says
+    so with `get(client, path, follow=True)`.
+    """
+    follow = kwargs.pop("follow", False)
+    return client.request("GET", path, follow_redirects=follow, **kwargs)
 
 
 def post(client: TestClient, path: str, pairs: list[tuple[str, str]] | None = None,

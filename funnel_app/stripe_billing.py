@@ -534,6 +534,95 @@ def is_cancelled(subscription: dict[str, Any]) -> bool:
     return bool(subscription.get("cancel_at_period_end")) or status in TERMINAL_STATUSES
 
 
+def card_of_object(obj: dict[str, Any]) -> dict[str, Any]:
+    """Card facts from any event object that carries a card, however it hangs.
+
+    Four shapes reach us and all four mean the same thing: a payment method expanded on a
+    subscription (`default_payment_method.card`), a charge with its payment method expanded
+    (`charge.payment_method.card`), a dispute whose `charge` object is expanded, and a Radar
+    early warning, whose *only* card information lives under `payment_intent.card_details`
+    (`network` and `customer_notification` are not cards at all). Walking each spelling in
+    one place is the point: the prepaid-BIN share the spec asks us to instrument from charge
+    one (§1.C criterion 4) is worth nothing if it depends on which object the event happened
+    to expand, and a funding type we did not observe is recorded as unknown rather than
+    guessed as consumer, because understating the prepaid share is the direction that hides
+    the warning.
+
+    Returns `{"funding": ..., "country": ..., "brand": ..., "last4": ...}` with empty strings
+    for whatever the payload did not carry.
+    """
+    # Depth matters here as much as spelling. A dispute carries no card of its own, only a
+    # charge whose `payment_method_details` holds the funding type; a Checkout session hangs
+    # the card off `payment_method`. Without those hops every dispute would log an unknown
+    # BIN type, and the BIN share is the leading indicator §1.C criterion 4 asks us to
+    # instrument from charge one, on exactly the events that trip the ratios.
+    holders: list[Any] = [obj]
+    for nested in (obj.get("charge"), obj.get("invoice"), obj.get("payment_intent")):
+        if isinstance(nested, dict):
+            holders.extend([nested, nested.get("payment_method"),
+                            nested.get("payment_method_details")])
+    candidates: list[Any] = [
+        obj.get("default_payment_method"),
+        obj.get("payment_method"),
+        obj.get("payment_method_details"),
+    ]
+    for holder in holders:
+        if not isinstance(holder, dict):
+            continue
+        for key in ("default_payment_method", "payment_method", "payment_method_details"):
+            value = holder.get(key)
+            if isinstance(value, dict):
+                candidates.append(value)
+    # A Radar early warning's card facts, spelled differently and reachable only this way.
+    for nested in (obj, obj.get("payment_intent") or {}):
+        details = nested.get("card_details") if isinstance(nested, dict) else None
+        if isinstance(details, dict) and details:
+            candidates.append(details)
+        # Stripe's live early-warning shape is flat: `network.card_funding`. Accepted
+        # alongside the documented spelling because the two have both been observed, and a
+        # warning we could not classify is the worst one to silently drop.
+        network = nested.get("network") if isinstance(nested, dict) else None
+        if isinstance(network, dict) and any(
+                network.get(key) for key in ("card_funding", "card_brand", "card_country")):
+            candidates.append({
+                "funding": network.get("card_funding", ""),
+                "country": network.get("card_country", ""),
+                "brand": network.get("card_brand", ""),
+            })
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        card = candidate.get("card") if isinstance(candidate.get("card"), dict) else candidate
+        if any(card.get(key) for key in ("funding", "brand", "last4", "country")):
+            return {
+                "funding": str(card.get("funding", "") or ""),
+                "country": str(card.get("country", "") or ""),
+                "brand": str(card.get("brand", "") or ""),
+                "last4": str(card.get("last4", "") or ""),
+            }
+    return {"funding": "", "country": "", "brand": "", "last4": ""}
+
+
+#: Stripe's `warning_reason` values that mean "the cardholder says this was fraud". The
+#: other values (`accepted`, `generic_complaint`, `product_unsatisfactory`, ...) are
+#: Radar's advice and arrive as *warnings, not disputes*: nothing in `hustle_metrics` holds
+#: them, which is exactly the gap §3.3 flags as the one gate we cannot otherwise measure.
+FRAUD_WARNING_REASONS = ("fraudulent", "abusive")
+
+
+def is_fraud_warning(warning: dict[str, Any]) -> bool:
+    """Whether a `radar.early_warning.created` object names fraud.
+
+    The ≤ 0.5% gate counts fraud flags, not advice. A warning whose reason is
+    `generic_complaint` is not evidence the account is being closed for fraud, and counting
+    it would trip the kill switch on the wrong signal, so only the fraud-named reasons are.
+    An absent `warning_reason` is counted, since Stripe sends the field on every warning
+    today and a warning we cannot classify is the one we should not quietly discard.
+    """
+    reason = str(warning.get("warning_reason", "") or "").strip().lower()
+    return reason in FRAUD_WARNING_REASONS or not reason
+
+
 def event_from_webhook(event: dict[str, Any]) -> dict[str, Any]:
     """Reduce a Stripe event to the fields this funnel acts on.
 
@@ -543,11 +632,34 @@ def event_from_webhook(event: dict[str, Any]) -> dict[str, Any]:
     obj = event.get("data", {}).get("object", {}) or {}
     metadata = obj.get("metadata") or {}
     brand, last4 = card_of(obj)
+    event_type = event.get("type", "")
+    # Money facts for the telemetry layer. `charge` is expanded on a dispute or a Radar
+    # warning, and is a bare id on `charge.refunded`, so the nested copy wins when the
+    # payload bothers to include one and the flat object is the fallback.
+    # Which object holds the *money* facts, which is not the event object for two of the
+    # shapes we handle: a dispute's amounts and customer live on its charge, and a Radar
+    # warning has no charge at all, only the payment intent it warns about. Resolving that
+    # once here is what stops every downstream ratio from being computed off zeros for the
+    # exact events the kill switches depend on.
+    nested = obj.get("charge")
+    if isinstance(nested, dict):
+        charge = nested
+    elif event_type.startswith("radar."):
+        intent = obj.get("payment_intent")
+        charge = intent if isinstance(intent, dict) else {}
+    else:
+        charge = obj
+    # The dispute/warning's own id, kept separate because `charge_id` is read as a charge id
+    # everywhere (dashboard lookups, dedupe keys) and a `dp_`/`rs_` id in that column breaks
+    # both. The event id identifies the warning when there is no charge.
+    nested_id = str(obj.get("id", "") or "") if charge is not obj else ""
+    card = card_of_object(obj)
+    metadata = obj.get("metadata") or charge.get("metadata") or {}
     return {
-        "type": event.get("type", ""),
+        "type": event_type,
         "id": event.get("id", ""),
-        "subscription_id": obj.get("id", "") if event.get("type", "").startswith("customer.subscription")
-        else (obj.get("subscription") or ""),
+        "subscription_id": obj.get("id", "") if event_type.startswith("customer.subscription")
+        else (obj.get("subscription") or charge.get("subscription") or ""),
         "customer_id": obj.get("customer", ""),
         "status": obj.get("status", ""),
         "cancel_at_period_end": bool(obj.get("cancel_at_period_end")),
@@ -557,9 +669,32 @@ def event_from_webhook(event: dict[str, Any]) -> dict[str, Any]:
         "card_brand": brand,
         "card_last4": last4,
         "email": (obj.get("customer_details") or {}).get("email", "") or metadata.get("email", ""),
-        "visitor_key": metadata.get("visitor_key", ""),
+        "visitor_key": metadata.get("visitor_key", "") or obj.get("client_reference_id", ""),
         "plan_signature": metadata.get("plan_signature", ""),
         "amount_total": obj.get("amount_total") or obj.get("total") or 0,
+        # ---- telemetry facts (Phase 3) ------------------------------------
+        # Read off `charge` so one shape serves a charge, a refund, a dispute and a Radar
+        # warning. `amount` is what a refund refunded and what a dispute contests;
+        # `amount_captured` is what we actually kept, which is the authorised-volume
+        # denominator §3.4 divides by. `outcome.type` is Stripe's own risk taxonomy on the
+        # charge (`fraudulent`, `manual_review`), the closest thing to a fraud flag that
+        # exists before a dispute is opened.
+        # `''` for a Radar warning rather than the warning's own id, because every consumer
+        # of this field treats it as a charge id (dashboard lookups, the dedupe key for a
+        # refund event). Warnings carry their own identity in `event["id"]`, which the
+        # telemetry uses, and pretending a `rs_` id is a `ch_` id would put a bogus value in
+        # a column someone later searches for a refund.
+        "charge_id": "" if event_type.startswith("radar.") else str(charge.get("id", "") or ""),
+        "signal_id": nested_id,
+        "amount": int(obj.get("amount") or charge.get("amount") or 0),
+        "amount_captured": int(charge.get("amount_captured") or 0),
+        "charge_status": str(charge.get("status", "") or ""),
+        "charge_outcome_type": str((charge.get("outcome") or {}).get("type", "") or ""),
+        "paid": bool(charge.get("paid")),
+        "card_funding": card["funding"],
+        "card_country": card["country"],
+        "warning_reason": str(obj.get("warning_reason", "") or ""),
+        "dispute_status": str(obj.get("status", "") or "") if event_type.startswith("charge.dispute") else "",
         # The 2-month coupon from the save-offer screen. `discount.expires_at` is the date the
         # processor itself says the promotion ends, which is better than counting invoices
         # against the "2 months" the screen promised: a member who was charged early, or
@@ -569,5 +704,20 @@ def event_from_webhook(event: dict[str, Any]) -> dict[str, Any]:
         "discount": obj.get("discount") or {},
         "discount_expires_at": (obj.get("discount") or {}).get("expires_at") or 0,
         "currency": obj.get("currency", ""),
-        "live_mode": bool(event.get("live_mode")),
+        # Stripe's envelope key is `livemode`, one word, and it sits on the *event*, not the
+        # object. `event.get("live_mode")` read a key that appears in no payload, so this was
+        # False for every event Stripe has ever sent, including a real live-mode dispute aimed at
+        # another merchant account. The mode-mismatch guards are what keep that account's disputes
+        # and refunds out of our 1% and 0.5% ceilings, so a ceiling that should have rung was
+        # reported clean while the misconfiguration streamed past it. Both spellings are read:
+        # `live_mode` is what our own fixtures and internal event copies have used, and it would
+        # take a second bug to make that wrong, whereas dropping it would silently disable the
+        # guard for every test in the suite at once.
+        "live_mode": bool(event.get("livemode") or event.get("live_mode")),
+        # Whether Stripe had already attempted this invoice when the failure fired. Absent reads
+        # as False, which is the safe direction: `attempted` is what tells the retry policy that
+        # a second failure is not the first one arriving twice, and inventing True would let any
+        # replay declare a member terminally lost and stop the one retry the spec owes them.
+        "attempted": bool(obj.get("attempted")),
+        "attempt_count": int(obj.get("attempt_count") or 0),
     }
