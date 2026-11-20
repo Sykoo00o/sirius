@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Trial started &middot; {{ brand }}{% endblock %}
+
+{% block main %}
+{#
+  Post-payment. The disclosures repeat here, in the processor-independent form, because the
+  receipt email is the record but this screen is what the customer reads *first*, on the way
+  back from entering a card number. A funnel that shows the renewal date on checkout, promises
+  it in an email, and lands the customer on a page that says only "thanks!" has made the
+  cheapest of its three chances the loudest.
+
+  The link is to `/dashboard` and not to `/preview`: the paid plan is a member surface now, and
+  the billing block at the top of that page is checklist 6 satisfied in the round.
+#}
+<section class="mx-auto max-w-copy px-4 pt-10 pb-16">
+  <div data-section="trial-confirmed" class="rounded-3xl border-2 border-moss/40 bg-moss-soft p-6 sm:p-7">
+    <p class="eyebrow eyebrow-moss">Trial started</p>
+    <h1 class="band-heading mt-3">Weeks 2 to 4 are open</h1>
+    <p class="mt-3 leading-relaxed">
+      You paid {{ copy.trial_amount }}. A receipt is on its way to
+      {{ email or 'the address you gave' }}.
+    </p>
+    <dl class="mt-5 space-y-1.5 text-sm">
+      <div class="flex gap-2"><span class="text-moss shrink-0" aria-hidden="true">&#10003;</span><span>{{ copy.price_line }}</span></div>
+      <div class="flex gap-2"><span class="text-moss shrink-0" aria-hidden="true">&#10003;</span><span>{{ renewal_line }}</span></div>
+      <div class="flex gap-2"><span class="text-moss shrink-0" aria-hidden="true">&#10003;</span><span>{{ copy.disclosure('refund_line') }}</span></div>
+      <div class="flex gap-2"><span class="text-moss shrink-0" aria-hidden="true">&#10003;</span><span>{{ copy.disclosure('cancel_line') }}</span></div>
+    </dl>
+    <p class="mt-4 text-sm leading-relaxed">{{ copy.renewal_warning() }}</p>
+  </div>
+
+  <div class="mt-6 flex flex-wrap gap-3">
+    <a href="/dashboard" class="btn-primary inline-flex items-center gap-2 px-6 py-4 text-lg font-semibold">
+      Open my 4-week plan <span aria-hidden="true">&rarr;</span>
+    </a>
+  </div>
+  <p class="mt-3 text-xs text-muted leading-relaxed">
+    {{ mail_note }}
+  </p>
+</section>
+{% endblock %}

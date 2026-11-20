@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Two quick questions &middot; {{ brand }}{% endblock %}
+
+{% block main %}
+{#
+  The 2-question exit survey, which arrives *after* the account is already cancelled (§2.3).
+  Because the action is complete, a question here is information rather than friction, which is
+  the distinction the spec draws: "a post-cancellation 2-question survey is fine, because the
+  account is already cancelled when the questions appear."
+
+  Load-bearing detail: this screen is reachable directly, without the survey having been
+  offered, and the only link to it is optional. Skipping it must be a visible choice with a
+  destination, not the absence of one.
+#}
+<section class="mx-auto max-w-copy px-4 pt-8 pb-16">
+  <p class="eyebrow">Optional</p>
+  <h1 class="band-heading mt-4">{{ headline }}</h1>
+  <p class="mt-2 text-muted leading-relaxed">
+    Your subscription is already cancelled and nothing here changes it. Two answers, about
+    thirty seconds, and they go to the person who writes the plan.
+  </p>
+
+  <form method="post" class="mt-7 space-y-6">
+    <fieldset>
+      <legend class="font-semibold">What made you cancel?</legend>
+      <ul class="mt-3 space-y-2">
+        {% for value, label in reasons %}
+          <li>
+            <label class="option flex items-center gap-3 rounded-2xl border border-line bg-white px-4 py-3.5 text-sm cursor-pointer">
+              <input type="radio" name="reason" value="{{ value }}" class="w-5 h-5" {% if value == chosen %}checked{% endif %}>
+              <span>{{ label }}</span>
+            </label>
+          </li>
+        {% endfor %}
+      </ul>
+    </fieldset>
+
+    <div>
+      <label class="font-semibold" for="note">{{ second_question }}</label>
+      <p class="mt-1 text-xs text-muted">Free text, and optional.</p>
+      <textarea id="note" name="note" rows="4" maxlength="500"
+                class="mt-2 w-full rounded-2xl border border-line bg-white px-4 py-3 text-base">{{ note }}</textarea>
+    </div>
+
+    <button type="submit" class="btn-primary px-6 py-3.5 font-semibold">Send both answers</button>
+  </form>
+
+  <form method="get" action="/dashboard" class="mt-4">
+    <button type="submit" class="w-full rounded-2xl border border-line bg-white px-5 py-3.5 text-base font-semibold text-muted hover:text-ink">
+      Skip it, take me to my account
+    </button>
+  </form>
+  <p class="mt-3 text-xs text-muted leading-relaxed">
+    We keep the two answers against your subscription so we can tell whether a cancellation was
+    about price, about time, or about the plan itself. Those lead to different fixes, and the
+    free text is the part nobody can infer from a number.
+  </p>
+</section>
+{% endblock %}

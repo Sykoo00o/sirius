@@ -1,0 +1,311 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Routine Lab Funnel</title>
+<style>
+  /* Faithful reconstruction of the rebuilt funnel: warm-paper palette from
+     funnel_app/templates/base.html, band rhythm + option row from static/app.css.
+     Device-frame mock, so all surfaces are explicit (single-look, both themes carry
+     the same light UI inside the phone frame; only the surrounding page adapts). */
+  :root {
+    --bg: #eceae4;            /* page ground behind the device frames */
+    --fg: #2b2622;            /* ink */
+    --accent: #cf4a07;        /* ember, CTA fill (4.53:1 under white) */
+    --muted: #6f665c;
+    --card: #fffdfa;
+
+    /* the funnel's own palette, verbatim from app.css */
+    --paper: #fdfbf7; --cream: #f6f1e7; --shell: #f7f2e9;
+    --tint: #fbf3ea; --deep: #f6f1e7; --panel: #fffdfa;
+    --ember: #cf4a07; --ember-dark: #bf4708; --ember-soft: #fff1e8;
+    --eyebrow-bg: #fdece0; --eyebrow-fg: #a8480a;
+    --moss: #4a7c59; --moss-dark: #3d6849; --moss-pill: #eef4ef;
+    --line: #e7ded0; --opt-hover: #fdf1e7;
+
+    --sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+    --shadow-float: 0 1px 2px rgba(43,38,34,.04),0 4px 10px rgba(43,38,34,.04),0 14px 24px rgba(43,38,34,.05),0 32px 40px rgba(43,38,34,.04);
+    --shadow-cta: 0 4px 12px rgba(207,74,7,.28),0 2px 6px rgba(43,38,34,.10),inset 0 0 16px rgba(255,255,255,.22);
+  }
+  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){ --bg:#141310; --fg:#ece7df; --card:#1e1c18; --muted:#a89e91; color-scheme:dark; } }
+  :root[data-theme="dark"]{ --bg:#141310; --fg:#ece7df; --card:#1e1c18; --muted:#a89e91; color-scheme:dark; }
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);
+       padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));}
+  .wrap{max-width:1180px;margin-inline:auto;padding-block:32px 64px}
+
+  /* ---- intro strip ---- */
+  .intro{padding-block:4px 28px}
+  .intro .kick{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;letter-spacing:.2px;color:var(--ember);background:var(--ember-soft);padding:6px 12px;border-radius:999px}
+  .intro h1{font-size:clamp(26px,4vw,40px);line-height:1.1;letter-spacing:-.03em;font-weight:600;margin:16px 0 0;text-wrap:balance;max-width:20ch}
+  .intro p{color:var(--muted);font-size:15px;line-height:1.55;max-width:56ch;margin:12px 0 0}
+
+  /* ---- legend ---- */
+  .legend{display:flex;flex-wrap:wrap;gap:10px;padding:14px 16px;background:var(--card);border-radius:16px;box-shadow:var(--shadow-float);margin-bottom:28px}
+  .sw{display:flex;align-items:center;gap:9px;font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--fg)}
+  .sw i{width:22px;height:22px;border-radius:6px;border:1px solid rgba(43,38,34,.12);display:block}
+  .sw b{font-weight:600}
+  .sw span{color:var(--muted)}
+
+  /* ---- screens layout ---- */
+  .row{display:flex;gap:32px;align-items:flex-start}
+  .stack{display:flex;flex-direction:column;gap:20px;flex:1 1 320px;min-width:0;max-width:430px}
+  .wide{flex:1 1 620px;min-width:0}
+  .lab{font-size:12px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);margin:0 0 12px;display:flex;gap:10px;align-items:baseline}
+  .lab em{font-style:normal;font-weight:500;text-transform:none;letter-spacing:0;font-size:12.5px;color:var(--muted)}
+
+  /* ---- device chrome ---- */
+  .phone{background:#111;border-radius:44px;padding:11px;box-shadow:0 2px 0 rgba(255,255,255,.05) inset,var(--shadow-float)}
+  .phone .vp{position:relative;overflow:hidden;height:812px;border-radius:33px;display:flex;flex-direction:column}
+  .notch{position:absolute;top:0;left:50%;transform:translateX(-50%);width:118px;height:26px;background:#111;border-radius:0 0 16px 16px;z-index:40}
+  .desk{background:#0f0e0c;border-radius:16px;padding:9px;box-shadow:var(--shadow-float)}
+  .deskbar{display:flex;align-items:center;gap:6px;height:30px;padding:0 12px;background:#1c1a17;border-radius:8px 8px 0 0}
+  .deskbar i{width:10px;height:10px;border-radius:50%;background:#3a352f;display:block}
+  .desk .vp{position:relative;overflow:auto;height:708px;background:var(--paper);border-radius:0 0 8px 8px}
+
+  /* ---- shared funnel chrome ---- */
+  .hdr{position:sticky;top:0;z-index:30;height:56px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;
+       padding:0 18px;background:rgba(253,251,247,.82);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:600;font-size:15px;letter-spacing:-.2px;color:var(--fg)}
+  .mono{width:26px;height:26px;border-radius:8px;background:var(--ember);color:#fff;display:grid;place-items:center;font-weight:700;font-size:14px}
+  .hdr a{font-size:13px;color:var(--muted);text-decoration:none}
+  .feed{overflow-y:auto;background:var(--paper);flex:1 1 auto;scrollbar-width:thin}
+  .feed::-webkit-scrollbar{width:6px}.feed::-webkit-scrollbar-thumb{background:#e2d8c8;border-radius:6px}
+
+  /* ---- bands ---- */
+  .bands{padding:12px;display:flex;flex-direction:column;gap:12px;background:var(--paper)}
+  .band{border-radius:24px;padding:56px 20px}
+  .band-tint{background:var(--tint)}.band-deep{background:var(--deep)}.band-panel{background:var(--panel)}
+  .center{text-align:center;margin-inline:auto;max-width:46ch}
+  .eyebrow{display:inline-flex;align-items:center;gap:8px;border-radius:999px;padding:8px 14px;font-size:13px;font-weight:600;line-height:18px;letter-spacing:-.1px;background:var(--eyebrow-bg);color:var(--eyebrow-fg)}
+  .eyebrow-moss{background:var(--moss-pill);color:var(--moss-dark)}
+  .tile{background:#fff;border-radius:16px;padding:12px 8px;text-align:center;box-shadow:var(--shadow-float)}
+  .dot{width:6px;height:6px;border-radius:50%;margin:0 auto 6px}
+  .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:left}
+  .display{font-size:34px;line-height:38px;letter-spacing:-1.3px;font-weight:600;margin:22px 0 0;text-wrap:balance}
+  .text-gradient{background:linear-gradient(90deg,#cf4a07 0%,#cf7300 48%,#d6336c 100%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  .sub{color:var(--muted);font-size:15px;line-height:1.6;margin:16px 0 0}
+  .btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:999px;color:#fff;background:var(--ember);
+               border-bottom:3px solid rgba(160,58,6,.45);box-shadow:var(--shadow-cta);padding:16px 22px;font-weight:600;font-size:16px;text-decoration:none;width:100%}
+  .fine{color:var(--muted);font-size:12.5px;line-height:1.5;margin:12px 0 0}
+  .disc{list-style:none;padding:0;margin:20px 0 0;display:flex;flex-direction:column;gap:8px;text-align:left;font-size:12.5px;color:var(--muted);line-height:1.5}
+  .disc li{display:flex;gap:8px}.disc .ck{color:var(--moss);flex:0 0 auto}
+  .band-heading{font-size:26px;line-height:30px;letter-spacing:-.8px;font-weight:600;margin:0;text-wrap:balance}
+  .cards{display:grid;gap:14px;margin-top:26px}
+  @media (min-width:900px){.cards.two{grid-template-columns:1fr 1fr}.cards.three{grid-template-columns:repeat(3,1fr)}}
+  .card{border-radius:20px;padding:20px}
+  .card h3{font-size:16px;font-weight:600;letter-spacing:-.3px;margin:0}
+  .card p{color:var(--muted);font-size:13.5px;line-height:1.55;margin:8px 0 0}
+  .num{width:38px;height:38px;border-radius:50%;background:var(--ember-soft);color:var(--ember-dark);display:grid;place-items:center;font-weight:700;font-size:15px}
+  .list{list-style:none;padding:0;margin:14px 0 0;display:flex;flex-direction:column;gap:10px;font-size:13.5px;line-height:1.45}
+  .list li{display:flex;gap:10px}.list .lock{color:var(--muted);flex:0 0 auto}
+  .title-kicker{font-size:12px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)}
+
+  /* ---- quiz ---- */
+  .quiz{background:var(--shell);flex:1 1 auto;display:flex;flex-direction:column}
+  .qprog{position:sticky;top:0;z-index:20;padding:14px 20px;background:rgba(247,242,233,.95);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  .qprog .track{height:6px;border-radius:999px;background:#e7ded0;overflow:hidden}
+  .qprog .fill{height:100%;border-radius:999px;background:linear-gradient(90deg,#cf4a07,#cf7300)}
+  .qprog .lbl{display:flex;justify-content:space-between;font-size:12px;font-weight:600;color:var(--muted);margin-top:9px;font-variant-numeric:tabular-nums}
+  .qcol{max-width:30rem;width:100%;margin-inline:auto;padding:22px 20px 40px}
+  .qkick{font-size:13px;font-weight:600;color:var(--muted);letter-spacing:.2px;margin:0 0 18px}
+  .qh{font-size:26px;line-height:32px;letter-spacing:-.9px;font-weight:600;margin:0;text-wrap:balance}
+  .qhelp{color:var(--muted);font-size:14px;line-height:1.5;margin:10px 0 22px}
+  .opts{display:flex;flex-direction:column;gap:8px}
+  .option{display:flex;align-items:center;gap:14px;min-height:64px;border:2px solid transparent;border-radius:16px;background:var(--panel);
+          padding:16px 18px;cursor:pointer;box-shadow:0 1px 2px rgba(43,38,34,.05);transition:background-color .15s ease,border-color .15s ease,box-shadow .15s ease}
+  .option.sel{border-color:var(--ember);background:var(--opt-hover);box-shadow:0 2px 8px rgba(207,74,7,.12)}
+  .option .inp{width:20px;height:20px;flex:0 0 auto;border-radius:50%;border:2px solid #cfc4b2;position:relative}
+  .option.sel .inp{border-color:var(--ember)}.option.sel .inp::after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--ember)}
+  .olabel{font-size:16px;line-height:22px;font-weight:600;letter-spacing:-.2px;color:var(--fg)}
+  .qfoot{margin-top:26px;display:flex;align-items:center;justify-content:space-between;gap:14px}
+  .ghost{font-size:14px;color:var(--muted);text-decoration:none}
+  .qsave{font-size:11.5px;color:var(--muted);margin-top:16px;line-height:1.5}
+
+  /* ---- checkout mini + palette type note ---- */
+  .note{margin-top:34px;padding:18px 20px;background:var(--card);border-radius:16px;box-shadow:var(--shadow-float);font-size:13.5px;line-height:1.6;color:var(--muted)}
+  .note b{color:var(--fg);font-weight:600}
+  @media (max-width:1080px){.row{flex-direction:column}.stack,.wide{max-width:none;width:100%}}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+
+  <div class="intro">
+    <span class="kick">Rebuilt on the simple.life reference pattern</span>
+    <h1>The Routine Lab funnel, as it renders now</h1>
+    <p>A faithful reconstruction, not a screenshot. Copy pulled from the running server, every color and spacing value from <code>static/app.css</code> and <code>base.html</code>. Tap the third option on the quiz to feel the selected state.</p>
+  </div>
+
+  <div class="legend">
+    <div class="sw"><i style="background:#cf4a07"></i><span><b>#cf4a07</b> ember CTA &middot; 4.53:1</span></div>
+    <div class="sw"><i style="background:#fbf3ea"></i><span><b>#fbf3ea</b> band-tint</span></div>
+    <div class="sw"><i style="background:#f6f1e7"></i><span><b>#f6f1e7</b> band-deep</span></div>
+    <div class="sw"><i style="background:#f7f2e9"></i><span><b>#f7f2e9</b> quiz shell</span></div>
+    <div class="sw"><i style="background:#2b2622"></i><span><b>#2b2622</b> ink &middot; 13.6:1</span></div>
+    <div class="sw"><i style="background:#4a7c59"></i><span><b>#4a7c59</b> moss</span></div>
+    <div class="sw"><i style="background:#a8480a"></i><span><b>#a8480a</b> eyebrow fg &middot; 4.5:1</span></div>
+  </div>
+
+  <div class="row">
+
+    <!-- phone 1: landing -->
+    <div class="stack">
+      <p class="lab">Landing <em>/ &middot; 390px</em></p>
+      <div class="phone"><div class="vp">
+        <div class="notch"></div>
+        <div class="hdr"><span class="brand"><span class="mono">R</span>Routine Lab</span><a href="#">Menu</a></div>
+        <div class="feed"><div class="bands">
+
+          <section class="band band-tint">
+            <div class="center">
+              <ul class="tiles" style="list-style:none;padding:0;margin:0">
+                <li class="tile"><span class="dot" style="background:#cf4a07"></span><span style="font-size:12.5px;font-weight:600">12 questions</span></li>
+                <li class="tile"><span class="dot" style="background:#f08c00"></span><span style="font-size:12.5px;font-weight:600">about 4 minutes</span></li>
+                <li class="tile"><span class="dot" style="background:#4a7c59"></span><span style="font-size:12.5px;font-weight:600">see week 1 free</span></li>
+              </ul>
+              <span class="eyebrow" style="margin-top:26px">Habit structure, not another diet</span>
+              <h1 class="display">A four-week routine that fits <span class="text-gradient">the week you actually have</span></h1>
+              <p class="sub">Answer twelve questions about your schedule, your food and the thing that usually breaks your streak. We build the first week around your answers and show it to you before you pay anything.</p>
+              <div style="margin-top:26px"><a class="btn-primary" href="#">Build your 4-week routine plan &rarr;</a></div>
+              <p class="fine">Takes about 4 minutes. $2.99 for the first 7 days, then $24.99/month until you cancel. See week 1 free first.</p>
+              <ul class="disc">
+                <li><span class="ck">&#10003;</span><span>$2.99 today for 7 days, then $24.99/month until you cancel</span></li>
+                <li><span class="ck">&#10003;</span><span>Refund window: ask within 14 days and the $2.99 comes back, no questions.</span></li>
+                <li><span class="ck">&#10003;</span><span>Cancel in one click. No phone call, no email hoops, no cancellation fee.</span></li>
+              </ul>
+            </div>
+          </section>
+
+          <section class="band band-deep">
+            <h2 class="band-heading" style="text-align:center">What this is, plainly</h2>
+            <div class="cards" style="gap:12px">
+              <div class="card" style="background:var(--panel)"><h3>A plan, not a promise</h3><p>Structure for seven days, built from the days, minutes and equipment you said you have.</p></div>
+              <div class="card" style="background:var(--panel)"><h3>Yours before you pay</h3><p>The week renders on screen from your own answers. Nothing is blurred, nothing is a screenshot.</p></div>
+              <div class="card" style="background:var(--panel)"><h3>Cancellable in one click</h3><p>No retention maze between the cancel button and a cancelled subscription.</p></div>
+            </div>
+          </section>
+
+          <section class="band band-panel">
+            <span class="eyebrow eyebrow-moss">How it works</span>
+            <h2 class="band-heading" style="margin-top:16px">Four minutes, then a week you can look at</h2>
+            <div style="display:flex;flex-direction:column;gap:22px;margin-top:26px">
+              <div><div class="num">1</div><h3 style="font-size:16px;font-weight:600;margin:12px 0 0">Twelve questions</h3><p class="fine" style="margin-top:6px">Goal, days you can protect, session length that is realistic, how you eat, what you can get to, sleep, and the blocker. No account.</p></div>
+              <div><div class="num">2</div><h3 style="font-size:16px;font-weight:600;margin:12px 0 0">Week 1, free, before any card</h3><p class="fine" style="margin-top:6px">Day by day: the session structure, the meal slots, the metrics to log, and the fallback rule. Real output, not a teaser image.</p></div>
+              <div><div class="num">3</div><h3 style="font-size:16px;font-weight:600;margin:12px 0 0">Weeks 2 to 4, if week 1 was worth something</h3><p class="fine" style="margin-top:6px">$2.99 for 7 days of the full plan, exports and weekly adjustments. Then $24.99/month, and one click ends it.</p></div>
+            </div>
+          </section>
+
+          <section class="band band-deep">
+            <div class="center">
+              <h2 class="band-heading">Four minutes now, a week you can follow tonight</h2>
+              <p class="sub">Takes about 4 minutes. $2.99 for the first 7 days, then $24.99/month until you cancel. See week 1 free first.</p>
+              <div style="margin-top:24px"><a class="btn-primary" href="#">Build your 4-week routine plan &rarr;</a></div>
+            </div>
+          </section>
+
+        </div></div>
+      </div></div>
+    </div>
+
+    <!-- phone 2: quiz -->
+    <div class="stack">
+      <p class="lab">Quiz <em>/onboarding/0 &middot; 390px</em></p>
+      <div class="phone"><div class="vp">
+        <div class="notch"></div>
+        <div class="quiz">
+          <div class="qprog">
+            <div class="track"><div class="fill" id="fill" style="width:0%"></div></div>
+            <div class="lbl"><span>Question 1 of 12</span><span id="pct">0%</span></div>
+          </div>
+          <div class="qcol">
+            <p class="qkick">What you want</p>
+            <h1 class="qh">What are you actually trying to build?</h1>
+            <p class="qhelp">Pick the one that matters most this month. One focus beats four.</p>
+            <div class="opts" id="opts">
+              <label class="option"><span class="inp"></span><span class="olabel">More steady energy through the day</span></label>
+              <label class="option"><span class="inp"></span><span class="olabel">Get stronger with weights</span></label>
+              <label class="option sel"><span class="inp"></span><span class="olabel">Move toward a weight that suits you</span></label>
+              <label class="option"><span class="inp"></span><span class="olabel">Better cardio and stamina</span></label>
+              <label class="option"><span class="inp"></span><span class="olabel">Move freely, feel less stiff</span></label>
+              <label class="option"><span class="inp"></span><span class="olabel">Sleep and recovery habits</span></label>
+            </div>
+            <div class="qfoot"><a class="ghost" href="#">Quit</a><a class="btn-primary" href="#" style="width:auto;padding:14px 26px">Continue &rarr;</a></div>
+            <p class="qsave">Your answers save as you go, so a dropped connection does not lose your progress.</p>
+          </div>
+        </div>
+      </div></div>
+      <div class="note" style="margin-top:16px">Selected row is <b>#fdf1e7</b> with a <b>2px #cf4a07</b> border at <b>150ms</b>. The border is drawn at rest and only recoloured, so selecting one option never shifts the ones below it. Rest <span style="white-space:nowrap">&#8594;</span> hover tint <span style="white-space:nowrap">&#8594;</span> selected + accent border, exactly the progression measured on the reference.</div>
+    </div>
+
+    <!-- desktop: landing wide -->
+    <div class="wide">
+      <p class="lab">Landing, desktop <em>/ &middot; 1180px</em></p>
+      <div class="desk">
+        <div class="deskbar"><i></i><i></i><i></i></div>
+        <div class="vp">
+          <div class="hdr" style="position:sticky"><span class="brand"><span class="mono">R</span>Routine Lab</span><a href="#">Start &rarr;</a></div>
+          <div style="padding:16px;display:flex;flex-direction:column;gap:16px;background:var(--paper)">
+
+            <section class="band band-tint" style="border-radius:40px;padding:72px 40px;text-align:center">
+              <div class="center" style="max-width:40ch">
+                <span class="eyebrow">Habit structure, not another diet</span>
+                <h1 class="display" style="font-size:52px;line-height:56px;letter-spacing:-2.4px">A four-week routine that fits <span class="text-gradient">the week you actually have</span></h1>
+                <p class="sub" style="font-size:18px">Answer twelve questions and we build the first week around your answers, shown to you before you pay anything.</p>
+                <div style="margin-top:28px"><a class="btn-primary" href="#" style="width:auto;padding:18px 34px;font-size:17px">Build your 4-week routine plan &rarr;</a></div>
+              </div>
+            </section>
+
+            <section class="band band-deep" style="border-radius:40px;padding:64px 40px">
+              <h2 class="band-heading" style="font-size:34px;line-height:38px;text-align:center">What this is, plainly</h2>
+              <div class="cards three">
+                <div class="card" style="background:var(--panel)"><h3>A plan, not a promise</h3><p>Structure for seven days, built from the days, minutes and equipment you said you have.</p></div>
+                <div class="card" style="background:var(--panel)"><h3>Yours before you pay</h3><p>The week renders on screen from your own answers. Nothing is blurred, nothing is a screenshot.</p></div>
+                <div class="card" style="background:var(--panel)"><h3>Cancellable in one click</h3><p>No retention maze between the cancel button and a cancelled subscription.</p></div>
+              </div>
+            </section>
+
+            <section class="band band-tint" style="border-radius:40px;padding:64px 40px">
+              <div class="center"><span class="eyebrow">Before the card details</span><h2 class="band-heading" style="font-size:34px;line-height:38px;margin-top:16px">What you get for free</h2></div>
+              <div class="cards two" style="margin-top:30px">
+                <div class="card" style="background:#fff">
+                  <div class="title-kicker" style="color:var(--moss-dark)">Free, before any card</div>
+                  <ul class="list">
+                    <li><span class="ck" style="color:var(--moss)">&#10003;</span><span>Week 1, day by day: session structure, meal slots, and three check-in metrics</span></li>
+                    <li><span class="ck" style="color:var(--moss)">&#10003;</span><span>The fallback rule for the blocker you told us about</span></li>
+                    <li><span class="ck" style="color:var(--moss)">&#10003;</span><span>A copy of your answers and the reasoning behind the week's layout</span></li>
+                  </ul>
+                </div>
+                <div class="card" style="background:var(--cream)">
+                  <div class="title-kicker">With the trial</div>
+                  <ul class="list">
+                    <li><span class="lock">&#9413;</span><span>Weeks 2, 3 and 4, with the load and session swaps written from week 1's log</span></li>
+                    <li><span class="lock">&#9413;</span><span>Export to PDF and plain text for the fridge door</span></li>
+                    <li><span class="lock">&#9413;</span><span>Weekly adjustments when a week goes sideways, which is when it matters</span></li>
+                  </ul>
+                </div>
+              </div>
+            </section>
+
+          </div>
+        </div>
+      </div>
+      <div class="note">Band rhythm taken from the capture: tinted rounded panels (radius 24px on phones, 40px from <b>sm</b>) inset from the edge, with 56px / 96px of interior air. Headline at weight 600 with tight negative tracking. Eyebrows are filled pills, not small-caps kickers. CTAs are 999px pills with a coloured shadow. All four are the reference's own measurements, tuned to a 42rem column.</div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  // quiz selected-state demo, so the reviewer can feel the 150ms transition
+  (function(){
+    var opts=document.querySelectorAll('#opts .option'), fill=document.getElementById('fill'), pct=document.getElementById('pct');
+    opts.forEach(function(o){
+      o.addEventListener('click',function(e){
+        e.preventDefault();
+        opts.forEach(function(x){x.classList.remove('sel')});
+        o.classList.add('sel');
+        var i=[].indexOf.call(opts,o)+1, p=Math.round(i/12*100);
+        fill.style.width=p+'%'; pct.textContent=p+'%';
+      });
+    });
+  })();
+</script>

@@ -12,8 +12,44 @@ below by the pattern table, the departure list, and a side-by-side look.
 
 Yes, across the whole funnel: `/`, `/onboarding/0..11`, `/summary`, `/preview`, `/checkout`,
 `/policy/{refund,terms,privacy}`, `/health`. One design system, in `static/app.css`, drawn on by
-every template. `pytest tests -q` is green at 190 and `node capture/audit.js` is clean at 390,
-768 and 1440.
+every template. `pytest tests -q` was green at 190 at handover and `node capture/audit.js` was
+clean at 390, 768 and 1440. Phase 2 added the money and the exit to that funnel and is recorded
+in its own section at the bottom, because the counts and the walk below are the rebuild's, not the
+funnel's current state.
+
+## Which screen carries which band (added by Phase 2)
+
+`data-section` is what `capture/walk_visual.js` and `page_sections.js` measure, so a new
+template that skips it joins the audit as an invisible page: measured, boxed as zero-height, and
+reported as nothing. Phase 2 added six templates and a `/health` band, all marked, so the
+member-side screens get the same 0-height and gutter detection as the quiz. The inventory is
+here because grepping nine templates for it is not documentation.
+
+| Template | Bands | Why that split |
+|---|---|---|
+| `checkout.html`, `checkout_live.html` | `price-block` | One name for both, because it is the disclosure band that is audited, not the rehearsal/live fork. The two templates must measure the same way or a live page can be unmeasured while looking identical. |
+| `checkout_done.html` | `trial-confirmed` | The post-payment screen where the renewal date and amount are restated: the screen a dispute starts from. |
+| `dashboard.html` | `billing-summary` | Amount and next-bill line, held as one band so a comparison of the two cannot be missed by an audit that walks bands separately. Measured 493px tall at 390px wide. |
+| `cancel_done.html` | `cancel-confirmed`, `save-offer` | Two, deliberately, because their order on the page is the compliance property. Action precedes persuasion means the confirmation band precedes the offer band, and the box positions are the cheap way to see that violated. Measured: confirmation at y=88 for 480px, menu starting at y=653, so the menu begins 85px below where the confirmation ends. `member_walk.js` fails the run if that ever inverts. |
+| `health.html` | `billing-checks` | Operator-facing, but audited anyway: an unreadable readiness page is how a missing key stays missing. |
+| `survey.html` | none | Two questions and a skip link, no band structure. Walked anyway, and clean at 390 and 768. |
+| `offer_done.html`, `checkout_error.html` | none | Single-message outcome screens. If Phase 3 grows either past one message, give it bands and it enters the section walk. |
+
+Measured by `capture/member_walk.js`, which is new with Phase 2: a paid row is seeded by
+`capture/member_seed.py`, the signed `rl_vid` cookie is rebuilt in Node from the same HMAC the
+app uses (truncated to 32 hex characters, which `session.py` does and a full-length MAC gets you
+silently logged out), and the screens are then reached by **clicking the funnel's own buttons**
+rather than by injecting forms. Clicking matters: the cancel screen's ordering only exists on the
+visit that performed the cancellation, and the offer screen only renders for a member who was
+just offered something. `capture/audit.js` walks Phase 1's routes, which are all GET-reachable
+without a subscription, so it cannot reach any of the above.
+
+Two things the click-through found that a static read of the templates could not: the dashboard's
+cancel button leads to a page that is *already* cancelled, so any walk that navigates to
+`/account/cancel` by URL measures the "Already cancelled" branch rather than the fresh one, and
+`/account/cancel/offer` after a pause renders no bands at all (header and footer only, 672px page),
+which is correct for that template but would look like a broken page to a walk that assumed
+otherwise.
 
 ## Pattern followed
 
@@ -135,7 +171,7 @@ both.
 ```bash
 cd funnel_app
 ../backend/.venv/bin/python -m uvicorn main:app --port 8091   # any free port; audit.js assumes 8091
-../backend/.venv/bin/python -m pytest tests -q                # 190 passed
+../backend/.venv/bin/python -m pytest tests -q                # 190 at handover, 265 now
 node capture/audit.js                                         # 390/768/1440 structural + contrast pass
 node capture/walk_visual.js capture/rebuild 390               # section boxes, 0-height detector
 node capture/shots.js http://127.0.0.1:8091/ capture/rebuild capture/sections.rebuild.json 390 768 1440
@@ -162,3 +198,26 @@ probes and `capture/plan.md`.
   a gutter used twice.
 - Auto-advance's 220ms beat is a judgement call, not a measurement. If the quiz starts feeling
   laggy on real devices, that number is the first thing to cut.
+
+## Phase 2, added after this handover
+
+The rebuild covered the funnel up to the paywall. Phase 2 is what happens after the card:
+`/checkout` in live mode, `/dashboard`, `/account/{plan.txt,plan.pdf,cancel,survey}`,
+`/webhooks/stripe` and `/ops/send-notices`, in `stripe_billing.py`, `billing.py`,
+`billing_store.py`, `save_offer.py` and `mailer.py`.
+
+Nothing about the design system changed and nothing needed to: the member screens are built from
+the same bands, eyebrows, pills and `.btn-primary` as the quiz, so the pattern table above is
+still an accurate description of every page in the funnel. The additions are the `data-section`
+inventory above, and `capture/member_walk.js`, which is the section walk for routes that need a
+paid cookie.
+
+The two properties Phase 2 had to earn are not visual, so they are not in the pattern table, and
+they are the two most likely to be undone by a well-meaning later edit:
+
+* **Action precedes persuasion**, held twice: `test_cancel_is_executed_before_any_offer_appears`
+  on the HTML, and `member_walk.js` on the measured band positions.
+* **A disclosed date is the processor's date.** The dashboard says *Estimated next bill* until a
+  real `current_period_end` has been read, and that distinction is copy, a template branch, a
+  `/health` finding and a test, because a renewal date is the sentence a chargeback is argued
+  over.

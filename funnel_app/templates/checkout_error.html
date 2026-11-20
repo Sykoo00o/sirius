@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Checkout trouble &middot; {{ brand }}{% endblock %}
+
+{% block main %}
+{#
+  Money-side failure. The one thing this page must get right is saying whether a card was
+  charged, because "did I just pay?" is the question a customer has at this moment and a page
+  that does not answer it generates the support email, or the dispute.
+#}
+<section class="mx-auto max-w-copy px-4 pt-10 pb-16">
+  <p class="eyebrow">Nothing was charged by us</p>
+  <h1 class="band-heading mt-4">{{ headline }}</h1>
+  <p class="mt-3 text-muted leading-relaxed">{{ detail }}</p>
+  <p class="mt-3 text-sm leading-relaxed">
+    {{ charged_note }}
+  </p>
+  <div class="mt-6 flex flex-wrap gap-3">
+    <a href="/checkout" class="btn-primary inline-flex items-center px-6 py-3.5 font-semibold">Try checkout again</a>
+    <a href="/preview" class="inline-flex items-center px-6 py-3.5 font-semibold rounded-2xl border border-line bg-white">Back to my week 1</a>
+  </div>
+  <p class="mt-4 text-xs text-muted leading-relaxed">
+    If you think you were charged, reply to any email from us at
+    {{ support_email }} and we will look it up by the date and amount, no form required.
+  </p>
+</section>
+{% endblock %}

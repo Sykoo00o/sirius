@@ -15,8 +15,9 @@ edit that adds "guaranteed results" fails locally instead of on a landing page.
 from __future__ import annotations
 
 import calendar
-from dataclasses import dataclass
-from datetime import date, timedelta
+import math
+from dataclasses import dataclass, replace
+from datetime import date, datetime, timedelta, timezone
 
 import claims
 from config import FunnelSettings
@@ -57,9 +58,62 @@ def money(minor: int, currency: str) -> str:
     return f"{symbol}{amount:.2f}".rstrip("0").rstrip(".")
 
 
+def human_date(day: date) -> str:
+    """Spelled-out day, the one format the renewal disclosure is allowed to use."""
+    return f"{calendar.day_name[day.weekday()]} {day.strftime('%d %B %Y')}"
+
+
+def iso_to_local_date(iso: str) -> date | None:
+    """Parse a stored ISO timestamp to a calendar date in local civil time.
+
+    Stored in UTC, displayed in the browser's/visitor's day, because a customer's "the 8th"
+    is their day and not ours. Returns None on anything unparseable rather than raising: the
+    caller's alternative is to fall back to the estimated date, and an account page that 500s
+    because a timestamp arrived in an unexpected shape is worse than one that says "about".
+    """
+    if not iso:
+        return None
+    try:
+        parsed = datetime.fromisoformat(iso)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone().date()
+
+
+def epoch_to_local_date(seconds: int) -> date | None:
+    if not seconds:
+        return None
+    return datetime.fromtimestamp(int(seconds), timezone.utc).astimezone().date()
+
+
+def next_bill_date(period_end: date | None, trial_days: int, *,
+                   today: date | None = None) -> tuple[date, bool]:
+    """The date to show as "next billing", and whether it is the processor's real date.
+
+    ``(real_period_end or estimated)``, with the boolean saying which. Two states rather
+    than one because the funnel has to display a renewal date before the processor has
+    answered (checkout, before a session exists), and checklist slot 4 does not accept
+    "we will tell you later". The caller must not present the estimated date as the real
+    one, so templates qualify it, and `/health` fails the account-page check if a
+    real-backed date ever renders as an estimate.
+    """
+    if period_end is not None:
+        return period_end, True
+    day = today or date.today()
+    return day + timedelta(days=trial_days), False
+
+
 @dataclass(frozen=True)
 class Copy:
-    """Rendered copy for one settings snapshot."""
+    """Rendered copy for one settings snapshot.
+
+    Immutable, and `for_renewal_date` derives a variant rather than mutating: the renewal
+    date is per-subscription while every other field is per-settings, and a mutated shared
+    `Copy` would leak one visitor's renewal date into the next visitor's landing page under
+    a threadpool.
+    """
 
     settings: FunnelSettings
     trial_amount: str
@@ -68,6 +122,52 @@ class Copy:
     trial_days: int
     today: str
     renewal_date: str
+    #: True when `renewal_date` comes from the processor's period end, false when it is the
+    #: checkout-time estimate. Templates must not claim precision the boolean denies.
+    renewal_is_real: bool = False
+
+    def for_renewal_date(self, renewal_date: str, *, is_real: bool = True) -> "Copy":
+        """A copy object whose renewal sentences name a specific date.
+
+        Used by the receipt email, the dashboard and the renewal notice, all of which know
+        the actual date and none of which should re-estimate it from today.
+        """
+        return replace(self, renewal_date=renewal_date, renewal_is_real=is_real)
+
+    def renewal_warning(self) -> str:
+        """The next-charge sentence, for surfaces *after* the trial payment.
+
+        The mandated `renewal_line` speaks from checkout, where the trial charge has not
+        happened yet. Repeated verbatim on a receipt it contradicts the "Charged today: $1"
+        line two rows above it, because the mandated amounts are the trial amount and the
+        rebill amount in one sentence. Rather than edit a mandated disclosure, post-payment
+        surfaces say the same fact in their own tense, with the amounts split across two
+        dated rows so nothing reads as a third price.
+        """
+        return (
+            f"That {self.trial_amount} was the whole cost until {self.renewal_date}. From "
+            f"then it is {self.rebill_per_month} each month until you cancel, and cancelling "
+            "is one click from your account page."
+        )
+
+    def slots(self) -> claims.Slots:
+        """The disclosure inputs for this copy, one construction site.
+
+        Existed as three near-identical `claims.Slots(...)` calls (here, in
+        `disclosure_coverage`, and it would have been a fourth in the email layer), and each
+        one was a place a new disclosure input could be forgotten. A missed field there is a
+        disclosure rendered without its amount.
+        """
+        return claims.Slots(
+            trial_amount=self.trial_amount,
+            rebill_per_month=self.rebill_per_month,
+            trial_days=self.trial_days,
+            refund_days=self.refund_days,
+            renewal_date=self.renewal_date,
+        )
+
+    def disclosure(self, slot: str) -> str:
+        return self.disclosures[slot]
 
     # ---- landing -----------------------------------------------------------
 
@@ -122,17 +222,16 @@ class Copy:
         the same operation. Templates iterate this dict; nothing else writes these
         sentences.
         """
-        slots = claims.Slots(
-            trial_amount=self.trial_amount,
-            rebill_per_month=self.rebill_per_month,
-            trial_days=self.trial_days,
-            refund_days=self.refund_days,
-            renewal_date=self.renewal_date,
-        )
-        return {key: text for key, text, _where in claims.rendered_disclosures(slots)}
+        return {key: text for key, text, _where in claims.rendered_disclosures(self.slots())}
 
-    def disclosure(self, slot: str) -> str:
-        return self.disclosures[slot]
+    @property
+    def price_line(self) -> str:
+        """Checklist 1's exact sentence for this copy's amounts and trial length.
+
+        Delegates to `claims.price_line` rather than re-spelling it, so the checkout screen
+        and the payment email cannot word it differently.
+        """
+        return claims.price_line(self.slots())
 
     @property
     def renewal_after_line(self) -> str:
@@ -140,6 +239,35 @@ class Copy:
         return (
             "Change your mind and it is one click from your account page, any time "
             "before then."
+        )
+
+    # ---- checkout, live mode -----------------------------------------------
+
+    @property
+    def card_stub_note(self) -> str:
+        return (
+            "Phase 1 rehearsal: no card is charged on this screen and nothing is stored. "
+            "This funnel is not taking money yet."
+        )
+
+    @property
+    def pay_button_label(self) -> str:
+        return f"Start my trial for {self.trial_amount}"
+
+    @property
+    def checkout_legal_note(self) -> str:
+        """The agreement line under the button, live mode.
+
+        Auto-renewal is on by default and *labelled* here, which is what checklist slot 3
+        permits; the pattern ICPEN flagged was making auto-renewal impossible to decline,
+        so the state is stated in words next to the button rather than left as a checkbox
+        inference. Checkout is where the disclosure obligation sits, so the account page
+        repeats the date and amount rather than repeating this sentence.
+        """
+        return (
+            f"Auto-renews monthly at {self.rebill_per_month} after the {self.trial_days}-day "
+            f"trial. By starting the trial you agree to the terms and confirm you have read "
+            "the refund policy."
         )
 
     @property
@@ -152,12 +280,52 @@ class Copy:
             "diagnosis, and no body-composition promise. See the terms page."
         )
 
+    # ---- account and cancellation ------------------------------------------
+
+    def next_bill_heading(self, *, plan: str = "full", discounted_months: int = 0,
+                          discounted_price: str = "") -> str:
+        """Plain statement of the next charge, for the account page headline slot.
+
+        `discounted_price` is what the discount offer actually quoted this member (half of
+        full, or half of lite). Left empty it falls back to `half_price`, and a caller that
+        knows the member's tier should pass it: guessing the wrong one states a price on the
+        account page that the next invoice will not match.
+        """
+        if discounted_months > 0:
+            price = discounted_price or self.half_price
+            base = self.lite_per_month if plan == "lite" else self.rebill_per_month
+            return (
+                f"Next charge: {price} for the next {discounted_months} months, then "
+                f"{base} on {self.renewal_date}."
+            )
+        if plan == "lite":
+            return f"Next charge: {self.lite_per_month} on {self.renewal_date}."
+        return f"Next charge: {self.rebill_per_month} on {self.renewal_date}."
+
     @property
-    def card_stub_note(self) -> str:
-        return (
-            "Phase 1 rehearsal: no card is charged on this screen and nothing is stored. "
-            "This funnel is not taking money yet."
-        )
+    def half_price(self) -> str:
+        """Half the rebill, for save-offer C.
+
+        Computed from the minor amount rather than typed, so a price change cannot leave a
+        "50% off" badge quoting yesterday's discount. Rounded up to the cent: a customer
+        shown "half price" and charged one cent under it is fine, one cent over is a
+        complaint, and rounding up means we never charge more than we showed.
+        """
+        half = math.ceil(self.settings.rebill_amount_minor / 2)
+        return money(half, self.settings.currency)
+
+    @property
+    def lite_per_month(self) -> str:
+        return f"{money(self.settings.lite_amount_minor, self.settings.currency)}/month"
+
+    @property
+    def half_lite_price(self) -> str:
+        """Half the lite price, for a lite member who takes the discount offer.
+
+        Its own property rather than an argument on `half_price`, so a template cannot pass the
+        wrong tier by position and quietly show a member a price the invoice will not match.
+        """
+        return money(math.ceil(self.settings.lite_amount_minor / 2), self.settings.currency)
 
     # ---- legal -------------------------------------------------------------
 
@@ -227,19 +395,19 @@ class Copy:
         }
 
 
-def build_copy(settings: FunnelSettings, *, today: date | None = None) -> Copy:
-    """Render copy for a settings snapshot.
+def build_copy(settings: FunnelSettings, *, today: date | None = None,
+               period_end_iso: str = "") -> Copy:
+    """Render copy for one settings snapshot, and optionally for one subscription.
 
-    The renewal date is a display estimate anchored on the trial length. Phase 1 shows
-    it because checklist slot 4 wants a renewal date reachable from checkout; the real
-    anchor will be the processor's subscription period once charges exist, and that swap
-    is one function here rather than a hunt through templates.
+    `period_end_iso` is the processor's period end (or trial end, during a trial). With it,
+    the renewal sentences carry the real date and `renewal_is_real` is True, which is what
+    every post-payment screen must use. Without it, the date is the estimate today + trial
+    length, and the copy says "about" because checklist slot 4 wants a renewal date
+    reachable from checkout while honesty forbids presenting a guess as a promise.
     """
     day = today or date.today()
-    renewal = day + timedelta(days=settings.trial_days)
-    # Day-level display, spelled out, so "renews about" cannot read as a precise promise
-    # from a number that is an estimate.
-    renewal_label = f"{calendar.day_name[renewal.weekday()]} {renewal.strftime('%d %B')}"
+    real = iso_to_local_date(period_end_iso)
+    renewal, is_real = next_bill_date(real, settings.trial_days, today=day)
     return Copy(
         settings=settings,
         trial_amount=money(settings.trial_amount_minor, settings.currency),
@@ -247,7 +415,8 @@ def build_copy(settings: FunnelSettings, *, today: date | None = None) -> Copy:
         refund_days=settings.refund_window_days,
         trial_days=settings.trial_days,
         today=day.strftime("%d %B %Y"),
-        renewal_date=renewal_label,
+        renewal_date=human_date(renewal),
+        renewal_is_real=is_real,
     )
 
 
@@ -276,11 +445,7 @@ def disclosure_coverage(copy: Copy) -> list[tuple[str, bool, str]]:
     places own the trailing copy.
     """
     rendered = copy.disclosures
-    slots = claims.Slots(
-        trial_amount=copy.trial_amount, rebill_per_month=copy.rebill_per_month,
-        trial_days=copy.trial_days, refund_days=copy.refund_days,
-        renewal_date=copy.renewal_date,
-    )
+    slots = copy.slots()
     rows: list[tuple[str, bool, str]] = []
     for key, expected, _where in claims.rendered_disclosures(slots):
         actual = rendered.get(key, "")

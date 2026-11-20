@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Sorted &middot; {{ brand }}{% endblock %}
+
+{% block main %}
+{#
+  Outcome of a taken save offer. The screen states the new amount and the new date rather than
+  saying "you're all set", because a save offer the customer cannot restate after taking it is
+  an offer they will dispute on the next invoice.
+#}
+<section class="mx-auto max-w-copy px-4 pt-10 pb-16">
+  <div class="rounded-3xl border-2 border-moss/40 bg-moss-soft p-6 sm:p-7">
+    <p class="eyebrow eyebrow-moss">Applied</p>
+    <h1 class="band-heading mt-3">{{ outcome.headline }}</h1>
+    <p class="mt-3 leading-relaxed">{{ outcome.detail }}</p>
+  </div>
+
+  <div class="mt-6 flex flex-wrap gap-3">
+    <a href="/dashboard" class="btn-primary inline-flex items-center px-6 py-3.5 font-semibold">See my account</a>
+    <a href="/account/survey" class="inline-flex items-center px-6 py-3.5 font-semibold rounded-2xl border border-line bg-white">
+      Two questions, if you like
+    </a>
+  </div>
+  <p class="mt-3 text-xs text-muted leading-relaxed">
+    Both are optional. Nothing here is required to keep what you just chose.
+  </p>
+</section>
+{% endblock %}

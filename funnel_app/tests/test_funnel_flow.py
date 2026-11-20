@@ -27,136 +27,14 @@ import config as config_module                              # noqa: E402
 from quiz import (NOTE_SUFFIX, QUESTIONS, next_unanswered,  # noqa: E402
                   parse_answer, progress_pct)
 
-ANSWERS: list[list[tuple[str, str]]] = [
-    [("answer", "energy")],
-    [("answer", "comeback")],
-    [("answer", "3")],
-    [("answer", "30")],
-    [("answer", "evening")],
-    [("answer", "social")],
-    [("answer", "plant")],
-    [("restrictions", "dairy"), ("restrictions", "nuts")],
-    [("equipment", "dumbbells"), ("equipment", "bodyweight")],
-    [("answer", "minimal")],
-    [("answer", "under6")],
-    [("answer", "time"), ("note", "Two kids and a 40-hour week")],
-]
-
-
-@pytest.fixture()
-def client(tmp_path, monkeypatch):
-    """A fresh app on a throwaway database.
-
-    Separate databases matter more than they look: the progress guard reads stored answers,
-    so a shared dirty file makes a clean test fail with a 422 that looks like a validation
-    bug. Isolation here is what makes a red run mean something.
-    """
-    monkeypatch.setenv("FUNNEL_DB_PATH", str(tmp_path / "funnel.sqlite3"))
-    monkeypatch.setenv("FUNNEL_SESSION_SECRET", "test-secret-value")
-    monkeypatch.setenv("FUNNEL_CHARGES_ENABLED", "false")
-    for name in list(sys.modules):
-        if name in {"main", "config", "storage", "session"}:
-            del sys.modules[name]
-    import main
-
-    return attach(TestClient(main.app))
-
-
-JAR_KEY = "_jar"
-
-
-def jar_of(client: TestClient) -> dict[str, str]:
-    """Cookies this test conversation is holding, kept by hand.
-
-    `client.cookies` is *not* the transport's jar in this build: it reads empty while the
-    underlying transport keeps its own, separate jar. So `client.cookies.get("rl_vid")`
-    returns None (making the app look like it never issued a key) while a request carrying a
-    deliberately wrong hand-set cookie can still behave like an established visitor, because
-    the transport silently sends its real one too. Both directions of that mismatch cost
-    debugging time on the app's behalf, so the jar lives in this dict instead and every
-    request states what it is sending.
-    """
-    return getattr(client, JAR_KEY, {})
-
-
-def attach(client: TestClient) -> TestClient:
-    setattr(client, JAR_KEY, {})
-    original = client.request
-
-    def request(method, url, **kwargs):
-        """Forward by keyword only.
-
-        `httpx.Client.request(method, url, *, content, data, files, headers, ...)` takes
-        nothing useful positionally, so a `*args` passthrough here silently binds `data=` to
-        `files=`, which switches the encoder to multipart, drops the content type, and turns
-        every answer into a phantom. That single wrapper bug produced a whole chain of
-        plausible-looking app theories.
-        """
-        headers = dict(kwargs.pop("headers", None) or {})
-        for name, value in jar_of(client).items():
-            headers.setdefault("cookie", f"{name}={value}")
-        # POSTs must not follow their own 302: a client that follows it issues a GET to the
-        # next step and throws the body away, so every answer looks accepted while none saved.
-        if method.upper() != "GET":
-            kwargs["follow_redirects"] = kwargs.get("follow_redirects", False)
-        response = original(method, url, headers=headers, **kwargs)
-        # Record what the server asked us to remember, keyed off Set-Cookie.
-        for raw in response.headers.get_list("set-cookie"):
-            pair = raw.split(";", 1)[0]
-            if "=" in pair:
-                name, _sep, value = pair.partition("=")
-                jar_of(client)[name.strip()] = value.strip()
-        return response
-
-    client.request = request  # type: ignore[method-assign]
-    return client
-
-
-_URLENCODED = "application/x-www-form-urlencoded"
-
-
-def post(client: TestClient, path: str, pairs: list[tuple[str, str]] | None = None,
-         multipart: bool = False, **kwargs):
-    """POST one quiz answer, in either of the two encodings a form can legally arrive in.
-
-    Browsers send `application/x-www-form-urlencoded` for a form with no file field and
-    `multipart/form-data` for one with a file, and a funnel that only understands the first is
-    one stray `<input type=file>` away from losing every answer. `walk` alternates the two so
-    both stay covered without a duplicated suite.
-
-    Multipart is built with `files={name: (None, value)}`, which is httpx's spelling of "this
-    part is a plain field, not a file": it produces a real boundary and repeats a name once per
-    value, so checkbox groups survive. Passing `data=` a *list of tuples* instead is a trap,
-    and it cost the whole of one debugging session: that shape sends the pairs with no boundary
-    and, once the TestClient rebuilds wire headers from the request's own header list, no
-    content type either. Starlette then hands the handler an empty form and the funnel answers
-    "Choose one option to continue" about a request that carried a perfectly good answer. When
-    a quiz step rejects a valid answer, check this function before believing the app is wrong.
-    """
-    pairs = pairs or []
-    if multipart:
-        fields = [(name, (None, value)) for name, value in pairs]
-        # `files` as a list of pairs keeps repeated names, which a dict would collapse.
-        response = client.request("POST", path, files=fields, **kwargs)
-    else:
-        response = client.request("POST", path, data=_merge(pairs),
-                                  headers={"content-type": _URLENCODED}, **kwargs)
-    return response
-
-
-def _merge(pairs: list[tuple[str, str]]) -> dict:
-    """Repeated names into one dict of lists, which is how a browser submits checkboxes."""
-    merged: dict[str, list[str]] = {}
-    for key, value in pairs:
-        merged.setdefault(key, []).append(value)
-    return {key: (values[0] if len(values) == 1 else values) for key, values in merged.items()}
-
-
-def walk(client: TestClient, upto: int | None = None) -> None:
-    for index, pairs in enumerate(ANSWERS if upto is None else ANSWERS[:upto]):
-        # Alternate encodings so both paths stay exercised without a second suite.
-        response = post(client, f"/onboarding/{index}", pairs, multipart=bool(index % 2))
-        assert response.status_code in (200, 302), (index, response.status_code)
+# The fixture, the cookie jar, `post`, `walk` and `attach` come from `conftest.py` and are
+# re-exported here: two copies of the 12-answer walk is how one suite starts passing on
+# requests the other would reject, and every rule in that walk exists because of a specific
+# harness bug (`data=` bound to `files=` by a positional passthrough, a `client.cookies` reader
+# that disagrees with the transport's real jar, a POST that follows its own 302 and throws the
+# body away). Documented there rather than duplicated. `test_design_pattern.py` loads the same
+# module by path for the same reason.
+from conftest import (ANSWERS, attach, jar_of, post, walk)  # noqa: E402,F401
 
 
 # ---------------------------------------------------------------------------
@@ -337,10 +215,22 @@ def test_checkout_discloses_the_whole_offer_in_the_form(client):
     client.get("/preview")
     checkout = client.get("/checkout")
     assert checkout.status_code == 200
-    # Price must sit with the card field, not in a footer the visitor scrolls past.
+    # Amounts are read from config rather than hardcoded here: these are the Phase 0 baseline
+    # figures ($1 / 7 days / $39) and a test that retypes them on every price change is a test
+    # that quietly agrees with whatever the config says, including a wrong one. What this
+    # assertion is for is *placement* -- price must sit with the card field, not in a footer
+    # the visitor scrolls past -- so the amounts come from the same source the page does.
     form = checkout.text[checkout.text.find("<form"):]
-    assert "$2.99" in form and "$24.99" in form
+    for amount in _offer_amounts():
+        assert amount in form, amount
     assert "rehearsal" in checkout.text.lower(), "charges are off; the page must say so"
+
+
+def _offer_amounts() -> list[str]:
+    import config as _config
+    from funnel_copy import build_copy
+    copy_obj = build_copy(_config.FunnelSettings.from_env())
+    return [copy_obj.trial_amount, copy_obj.rebill_per_month.split("/")[0]]
 
 
 def test_checkout_post_records_intent_without_charging(client):
@@ -351,7 +241,7 @@ def test_checkout_post_records_intent_without_charging(client):
     done = post(client, "/checkout", [])
     assert done.status_code in (200, 302)
     body = done.text or client.get("/checkout").text
-    assert "$24.99" in body and "14" in body
+    assert _offer_amounts()[1] in body and "14" in body
 
 
 def test_health_reports_green_across_every_guard(client):

@@ -8,35 +8,55 @@ Deliberately standalone: this module imports nothing from `backend/engine`, and 
 layer loads `backend/llm_router.py` by file path so the funnel survives the engine being
 stopped. Port 8090 by default, clear of the engine (8099) and the B2B apps.
 
-Phase 1 scope: `/` landing, `/onboarding` quiz, `/summary` checkpoint, `/preview`
-artefact, plus a prototype checkout and static policy pages. No charge is taken anywhere:
-`FUNNEL_CHARGES_ENABLED` defaults false and the card screen says so in its own copy.
+Phase 2 scope on top of Phase 1: `/checkout` takes a card through Stripe's hosted page,
+`/dashboard` is the member surface with the billing block on it, `/account/cancel` is the
+one-click cancel with the save-offer menu behind it, and `/webhooks/stripe` keeps local state
+in step with the processor. Charges stay off unless `FUNNEL_CHARGES_ENABLED=true` *and* a
+funnel-account key is present; with either missing, the rehearsal path records intent and the
+card screen says so in its own copy.
 
 Route shape note: the quiz is one route per question rather than one big form, because
 sunk effort has to be *experienced* as a sequence of commitments. Every submit is a
 POST-redirect-GET, so a refresh re-posts cleanly instead of resubmitting, and every
 accepted answer writes a row, which is what makes per-step drop-off measurable later
 without a second analytics table.
+
+The cancel route is the one place that breaks POST-redirect-GET on purpose, and it is worth
+knowing before "fixing" it: §2.3 requires the cancellation to be *executed and confirmed*
+before any retention copy is chosen, so `/account/cancel` renders the confirmation itself
+rather than redirecting to a screen that would have to be handed the outcome anyway. One
+extra hop would be the difference between "cancel done" and "cancel pending, here is an
+offer", and the second reading is the dark pattern.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import re
+from dataclasses import replace
 from datetime import date
 from types import SimpleNamespace
 from pathlib import Path
 from typing import Any
 
+import anyio
 from fastapi import Depends, FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+import billing as billing_module
 import claims
+import save_offer
+import stripe_billing
+from billing_store import BillingStore, human_date, plan_label
 from config import FunnelSettings
 from funnel_copy import (ARTIFACT_FREE, ARTIFACT_PAID, TRUST_POINTS, Copy, build_copy,
-                        disclosure_coverage, guardrail_scan)
+                        disclosure_coverage, guardrail_scan, iso_to_local_date,
+                        money, next_bill_date)
 from llm_flavour import builder_coach_note, coach_note, load_router
+from mailer import Mailer
 from plan_builder import WEEK_ARCS, Plan, build_plan
 from plan_builder import _audit_meal_tables as plan_audit_problems
 from profile import is_complete, missing_indices, profile_from_answers
@@ -53,7 +73,33 @@ BASE_DIR = Path(__file__).resolve().parent
 settings = FunnelSettings.from_env()
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 store = ResponseStore(settings.database_abspath)
+billing_store = BillingStore(settings.billing_database_abspath)
+mailer = Mailer(settings)
 codec = SessionCodec(settings.session_secret)
+
+#: `BillingService.client` is None unless charges are armed *and* a funnel key exists, so an
+#: app started without money rails still serves every page and says which of the two is
+#: missing. Read lazily rather than built once at import: `/health` must report what *would*
+#: happen if a key appeared, and an operator deciding whether to flip `FUNNEL_CHARGES_ENABLED`
+#: needs the account type and descriptor off the live account, not a stale snapshot taken
+#: before the key was added. Construction errors still surface, on the page built to show them.
+billing = billing_module.BillingService(settings, billing_store, mailer, None)
+
+#: Has this process shown a member a renewal date read from the provider? Process-local on
+#: purpose, and named to be read in `billing_readiness`: after a restart the answer is no, and an
+#: ops page that said "yes, probably, sometime before the last deploy" would be asserting
+#: something it cannot know. A restart legitimately re-raises the issue rather than hiding it.
+SUBSCRIPTION_READ = False
+
+
+def billing_client() -> stripe_billing.StripeClient | None:
+    """The funnel's Stripe client for this request, or None while checkout is rehearsing.
+
+    `StripeMisconfigured` propagates: a B2B key where a funnel key belongs, or a `pk_test`
+    paired with `sk_live`, is not a state to serve traffic under, and refusing loudly at the
+    first checkout click beats discovering it as a charge on the wrong merchant account.
+    """
+    return stripe_billing.client_for(settings)
 
 app = FastAPI(
     title=f"{settings.brand_name} funnel",
@@ -408,47 +454,90 @@ async def preview(request: Request) -> HTMLResponse:
 
 
 # ---------------------------------------------------------------------------
-# Checkout prototype
+# Checkout
 # ---------------------------------------------------------------------------
+
+def _checkout_gate(request: Request) -> HTMLResponse | RedirectResponse | None:
+    """Checkout needs a finished quiz, and no more than that.
+
+    Returns the redirect a handler should give back when the visitor has not earned the
+    screen. Checked per handler rather than as middleware because `/checkout/complete` must
+    *not* enforce it: a visitor who pays and returns in a different browser still owns that
+    subscription, and bouncing them to question 1 would lose a paid customer at the finish
+    line for a missing cookie.
+    """
+    stored = answers_for(request)
+    if is_complete(stored):
+        return None
+    return RedirectResponse(url="/onboarding/0", status_code=302)
+
+
+def _renewal_line_for(copy_obj: Copy) -> str:
+    """The mandated renewal sentence, phrased for however certain the date is.
+
+    `claims.renewal_line` says "based on today, that first renewal falls about X", which is
+    right at checkout before a session exists and wrong once the processor has given a date,
+    where "about" understates a day we were told. The prefix is preserved so
+    `disclosure_coverage` still matches it, which is the whole argument for adjusting the
+    tail rather than replacing the sentence.
+    """
+    line = copy_obj.disclosure("renewal_line")
+    if copy_obj.renewal_is_real:
+        line = line.replace("Based on today, that first renewal falls about ",
+                            "Your first renewal falls on ")
+    return line
+
 
 @app.get("/checkout", response_class=HTMLResponse)
 async def checkout(request: Request) -> HTMLResponse:
-    stored = answers_for(request)
-    if not is_complete(stored):
-        return RedirectResponse(url="/onboarding/0", status_code=302)
-    # Recomputed, not stored: the signature is a hash of the answers, so recalculating it
-    # here proves the checkout screen shows the same plan the preview did.
-    plan_signature = profile_from_answers(stored).signature()
+    if blocked := _checkout_gate(request):
+        return blocked
+    plan_signature = profile_from_answers(answers_for(request)).signature()
 
     copy_obj = build_copy(settings)
     store.append_event(
         visitor_key=get_visitor(request),
         status="checkout_viewed",
-        answers=form_answers(stored),
+        answers=form_answers(answers_for(request)),
         step=len(QUESTIONS),
         offer_id=OFFER_ID,
         user_agent=request.headers.get("user-agent", ""),
     )
+    live = billing_client() is not None
+    if not live:
+        # Rehearsal keeps Phase 1's page verbatim, disabled inputs and all. Two templates
+        # instead of one dual-mode template: the absence of a payment widget is itself a
+        # disclosure, and a branch that can silently take the wrong side is how a rehearsal
+        # screen reaches production looking live.
+        return templates.TemplateResponse(
+            request, "checkout.html",
+            page_context(request, copy_obj=copy_obj, offer_id=OFFER_ID,
+                         plan_signature=plan_signature, trust_points=TRUST_POINTS,
+                         unlock_items=ARTIFACT_PAID),
+        )
     return templates.TemplateResponse(
-        request, "checkout.html",
+        request, "checkout_live.html",
         page_context(request, copy_obj=copy_obj, offer_id=OFFER_ID,
                      plan_signature=plan_signature, trust_points=TRUST_POINTS,
-                     unlock_items=ARTIFACT_PAID),
+                     unlock_items=ARTIFACT_PAID, renewal_line=_renewal_line_for(copy_obj),
+                     email="", error=""),
     )
 
 
 @app.post("/checkout", response_class=HTMLResponse)
 async def checkout_rehearsal(request: Request) -> HTMLResponse:
-    """Record intent. Nothing is charged, and the page says so on its face.
+    """Rehearsal submit: record intent, charge nothing, and say so on the resulting page.
 
-    Phase 1's job is to find out whether the artefact earns a card detail, not to move
-    money. When charges turn on, this handler becomes the processor call, and the row it
-    writes today is the shape `trial_events` already expects (`started` -> `paid`).
+    Arming charges makes this route redirect to the live flow instead of erroring, so a stale
+    tab opened before someone flipped `FUNNEL_CHARGES_ENABLED` lands on a working checkout
+    rather than on a form whose button no longer means anything.
     """
-    stored = answers_for(request)
-    if not is_complete(stored):
-        return RedirectResponse(url="/onboarding/0", status_code=302)
+    if blocked := _checkout_gate(request):
+        return blocked
+    if billing_client() is not None:
+        return RedirectResponse(url="/checkout", status_code=303)
 
+    stored = answers_for(request)
     store.append_event(
         visitor_key=get_visitor(request),
         status="started",
@@ -462,6 +551,609 @@ async def checkout_rehearsal(request: Request) -> HTMLResponse:
         request, "rehearsal_done.html",
         page_context(request, copy_obj=build_copy(settings)),
     )
+
+
+@app.post("/checkout/start", response_class=HTMLResponse)
+async def checkout_start(request: Request) -> HTMLResponse:
+    """Take the receipt email, create a Checkout session, and hand the browser to Stripe.
+
+    Charges-off is a redirect back to the card screen rather than a 409, so a visitor who
+    followed a link from before the switch flipped sees a coherent page instead of an error.
+    A processor rejection is the visitor's problem only in the sense that they must retry: the
+    message names what Stripe said, because "payment failed" with no reason is what makes
+    people try a second card and end up with two charges.
+    """
+    if blocked := _checkout_gate(request):
+        return blocked
+    client = billing_client()
+    if client is None:
+        return RedirectResponse(url="/checkout", status_code=303)
+
+    form = await request.form()
+    email = str(form.get("email") or "").strip()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}", email):
+        copy_obj = build_copy(settings)
+        return templates.TemplateResponse(
+            request, "checkout_live.html",
+            page_context(
+                request, copy_obj=copy_obj, offer_id=OFFER_ID,
+                plan_signature=profile_from_answers(answers_for(request)).signature(),
+                trust_points=TRUST_POINTS, unlock_items=ARTIFACT_PAID,
+                renewal_line=_renewal_line_for(copy_obj), email=email,
+                error="We need a working email address: the receipt is the record of what "
+                      "you agreed to, and it carries your cancel link."),
+            status_code=422,
+        )
+
+    stored = answers_for(request)
+    plan_signature = profile_from_answers(stored).signature()
+    try:
+        session = await anyio.to_thread.run_sync(
+            lambda: billing.create_session(
+                visitor_key=get_visitor(request), email=email,
+                plan_signature=plan_signature, origin=_origin(request)))
+    except stripe_billing.StripeError as exc:
+        log.error("checkout session creation failed: %s", exc)
+        return templates.TemplateResponse(
+            request, "checkout_error.html",
+            page_context(request, headline="We could not open the payment page.",
+                         detail=f"The payment provider said: {exc}",
+                         charged_note="Nothing has been charged, so trying again is safe.",
+                         **{}),
+            status_code=502,
+        )
+
+    url = session.get("url") or ""
+    if not url:
+        return templates.TemplateResponse(
+            request, "checkout_error.html",
+            page_context(request, headline="We could not open the payment page.",
+                         detail="The payment provider returned a session with no address to "
+                                "go to, which is a problem on our side.",
+                         charged_note="Nothing has been charged."),
+            status_code=502,
+        )
+    return RedirectResponse(url=url, status_code=303)
+
+
+@app.get("/checkout/complete", response_class=HTMLResponse)
+async def checkout_complete(request: Request, session_id: str = "") -> HTMLResponse:
+    """Landing page after Stripe says the card took.
+
+    Deliberately does not require the quiz cookie. The session id is looked up at the
+    processor and its `client_reference_id` compared to this visitor, so the page credits a
+    plan on evidence rather than on a redirect that merely *looked* successful: anyone can put
+    a session id in a URL, and the two checks are what stop that crediting a stranger's
+    purchase to the wrong row.
+    """
+    visitor_key = get_visitor(request)
+    stored = answers_for(request)
+    try:
+        row = await anyio.to_thread.run_sync(
+            lambda: billing.checkout_complete(
+                visitor_key=visitor_key, session_id=session_id, email="",
+                plan_signature=(profile_from_answers(stored).signature() if stored else ""),
+                answers=form_answers(stored) if stored else {},
+                coach_note=""))
+    except stripe_billing.StripeError as exc:
+        log.error("checkout completion rejected (%s): %s", session_id, exc)
+        return templates.TemplateResponse(
+            request, "checkout_error.html",
+            page_context(
+                request, headline="We could not confirm that payment.",
+                detail=("We reached the payment provider and it did not recognise this "
+                        f"checkout as yours. What it said: {exc}"),
+                charged_note=("If a charge appears on your statement, it is real and we can "
+                              "find it by date and amount, so you do not need to repeat it.")),
+            status_code=400,
+        )
+
+    copy_obj = billing.copy(row)
+    results = billing.send_trial_receipt(row)
+    store.append_event(
+        visitor_key=visitor_key, status="paid",
+        answers=form_answers(stored) if stored else {},
+        step=len(QUESTIONS) + 1,
+        plan_signature=row.get("plan_signature", ""), plan_source="checkout",
+        offer_id=OFFER_ID, user_agent=request.headers.get("user-agent", ""),
+    )
+    delivered = [result for result in results if result.ok]
+    return templates.TemplateResponse(
+        request, "checkout_done.html",
+        page_context(
+            request, copy_obj=copy_obj, email=row.get("email", ""),
+            renewal_line=_renewal_line_for(copy_obj),
+            mail_note=(
+                f"Receipt sent to {delivered[0].to}." if delivered else
+                "We could not send the receipt email, so the four lines above are the record "
+                "of what you agreed to; they repeat on your account page, which needs no "
+                "email to open.")),
+    )
+
+
+@app.get("/checkout/cancelled", response_class=HTMLResponse)
+async def checkout_cancelled(request: Request) -> HTMLResponse:
+    """Visitor backed out of Stripe's page. Nothing was charged and nothing was written."""
+    return templates.TemplateResponse(
+        request, "checkout_error.html",
+        page_context(
+            request, headline="Checkout closed, nothing charged.",
+            detail="You left the payment page, so no subscription exists and no money moved. "
+                   "Week 1 is still yours, free, and this page stays open as long as you want "
+                   "to keep reading it.",
+            charged_note="No charge was made and nothing was saved."),
+    )
+
+
+def _origin(request: Request) -> str:
+    """Absolute origin for the processor's return URLs.
+
+    From the request rather than from config, because a staging deploy behind a proxy must
+    hand Stripe a URL that actually resolves for the visitor who left. `FUNNEL_PUBLIC_URL` is
+    the fallback, and the config value is the one `/health` shows, so a wrong host in a return
+    URL is visible before a customer meets it.
+    """
+    forwarded = request.headers.get("x-forwarded-proto", "")
+    scheme = forwarded.split(",")[0].strip() or request.url.scheme
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
+    if not host:
+        return settings.public_url
+    return f"{scheme}://{host}".rstrip("/")
+
+
+# ---------------------------------------------------------------------------
+# Member area: dashboard, plan export, cancel + save offer
+# ---------------------------------------------------------------------------
+
+def _subscription_context(request: Request, row: dict[str, Any]) -> dict[str, Any]:
+    """Billing block context, built the same way for every member surface.
+
+    Centralised because checklist 6 is about one thing: the amount and the next date, always
+    visible. Two places assembling that pair by hand is how a date stops showing on one of
+    them, which is the soft Roach Motel the spec names.
+    """
+    copy_obj = billing.copy(row)
+    period_end = iso_to_local_date(row.get("current_period_end", ""))
+    renewal, is_real = next_bill_date(period_end, settings.trial_days)
+    if is_real:
+        # Charges are armed and a real period end is in hand, which is the fact `/health` says it
+        # wants to know before it stops calling every renewal date an estimate. A process-local
+        # flag rather than a fresh provider read: the check is "has anyone been told a real date
+        # yet", and this function is the one place a real date becomes a page.
+        global SUBSCRIPTION_READ
+        SUBSCRIPTION_READ = True
+    status = row.get("status", "")
+    discounted = int(row.get("discount_months") or 0)
+    price = (billing.copy(row).lite_per_month if row.get("plan") == "lite"
+             else copy_obj.rebill_per_month)
+    charged = _minor(row.get("trial_amount_minor") or settings.trial_amount_minor)
+    return {
+        "subscription": row,
+        "status": status,
+        "is_cancelled_state": status in ("cancelled_at_period_end", "canceled"),
+        "is_paused": status == "paused",
+        "copy": copy_obj,
+        "renewal_label": human_date(renewal),
+        "renewal_is_real": is_real,
+        "plan_name": plan_label(row.get("plan", "full"), discounted=bool(discounted)),
+        "plan_price": price,
+        "charged_amount": charged,
+        "charged_on": _charged_on(row),
+        "card_note": f"{row['card_brand']} ending {row['card_last4']}"
+        if row.get("card_brand") and row.get("card_last4") else "",
+        "next_bill_line": copy_obj.next_bill_heading(
+            plan=row.get("plan", "full"), discounted_months=discounted,
+            discounted_price=(copy_obj.half_lite_price if row.get("plan") == "lite"
+                              else copy_obj.half_price) if discounted else ""),
+        "billing_note": _billing_note(row, copy_obj),
+    }
+
+
+def _minor(minor_units: int) -> str:
+    return money(int(minor_units), settings.currency)
+
+
+def _charged_on(row: dict[str, Any]) -> str:
+    created = iso_to_local_date(row.get("created_at", ""))
+    return human_date(created) if created else "at checkout"
+
+
+def _billing_note(row: dict[str, Any], copy_obj: Copy) -> str:
+    """One honest sentence about where the numbers came from.
+
+    Shown because the renewal date is a disclosure, and a date that came from a rehearsal
+    rather than from the processor deserves to say so on the page a member reads before their
+    first real charge.
+    """
+    if row.get("subscription_id"):
+        return (
+            "Dates and amounts come from your subscription record at the payment provider, so "
+            "they match the invoice you will receive.")
+    return (
+        "This subscription has no payment-provider record yet, so the date above is the "
+        f"{settings.trial_days}-day trial length counted from checkout. It is confirmed by the "
+        "receipt email as soon as a charge exists.")
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard(request: Request) -> HTMLResponse:
+    """The member surface: billing block first, the unlocked 4-week plan below it.
+
+    Reads only what was paid for. `answers_json` is the snapshot taken at checkout, so a
+    member who clears cookies, switches browser, or later rebuilds a plan from different
+    answers still sees the plan they bought, and an export they download matches it.
+    """
+    row = billing_store.get_subscription(get_visitor(request))
+    if row is None:
+        return templates.TemplateResponse(
+            request, "dashboard.html",
+            page_context(request, subscription=None, plan=None, weeks=[], total=0,
+                         copy_obj=build_copy(settings), renewal_label="", status="",
+                         is_cancelled_state=False, is_paused=False, renewal_is_real=False,
+                         plan_name="", plan_price="", charged_amount="", charged_on="",
+                         card_note="", next_bill_line="", billing_note=""),
+        )
+
+    context = _subscription_context(request, row)
+    answers, coach_note = _stored_answers(row)
+    plan: Plan | None = None
+    if answers:
+        plan = build_plan(profile_from_answers(answers))
+        if coach_note:
+            plan = plan.with_coach_note(coach_note, source=plan.source)
+    return templates.TemplateResponse(
+        request, "dashboard.html",
+        page_context(
+            request, plan=plan,
+            weeks=_member_weeks(plan) if plan else [],
+            total=len(QUESTIONS) if answers else 0, **context),
+    )
+
+
+def _stored_answers(row: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    """The answers snapshot, defensively.
+
+    Returns `({}, '')` rather than raising on anything unparseable. A member's plan disappearing
+    is bad, but an account page that 500s on one malformed JSON blob takes the *billing* block
+    down with it, and checklist 6 says the next date stays visible.
+    """
+    try:
+        blob = json.loads(row.get("answers_json") or "{}")
+    except json.JSONDecodeError:
+        return {}, ""
+    answers = blob.get("answers") or {}
+    return (answers if isinstance(answers, dict) else {}), str(blob.get("coach_note") or "")
+
+
+def _member_weeks(plan: Plan) -> list[dict[str, Any]]:
+    """Four weeks for the paid view: week 1 with its real day count, weeks 2-4 with their arcs.
+
+    Week 1's lines come from the plan rather than from the arc text, because week 1 is the week
+    the member has already read and a summary that contradicts it reads as a different product.
+    """
+    weeks: list[dict[str, Any]] = []
+    for arc in WEEK_ARCS:
+        number = int(arc["week"])
+        if number == 1:
+            training = sum(1 for day in plan.days if day.is_training_day)
+            lines = [
+                f"{training} sessions, {plan.session_minutes} minutes each, {plan.split_label}",
+                "Meal structure for every day, from the diet and the food you said you avoid",
+                f"Three metrics to log, and the fallback rule for {plan.fallback_rule.split('.')[0].lower()}",
+            ]
+        else:
+            lines = [arc["arc"]]
+        weeks.append({"number": number, "label": arc["label"], "arc": arc["arc"],
+                      "lines": lines})
+    return weeks
+
+
+@app.get("/account/plan.txt", response_class=HTMLResponse)
+async def plan_export(request: Request) -> Response:
+    """Plain-text plan, for the fridge door and for anybody who wants their data out.
+
+    A `Content-Disposition` attachment, because "export" that opens in a tab is a page you now
+    have to copy by hand. Terms say whatever you generated while subscribed stays exportable,
+    and a terms sentence the funnel does not implement is a claim.
+    """
+    row = billing_store.get_subscription(get_visitor(request))
+    if row is None:
+        return RedirectResponse(url="/dashboard", status_code=302)
+    answers, _note = _stored_answers(row)
+    if not answers:
+        return Response(content="Plan unavailable for this subscription.\n",
+                        media_type="text/plain; charset=utf-8",
+                        headers={"content-disposition":
+                                 'attachment; filename="routine-lab-plan.txt"'})
+    plan = build_plan(profile_from_answers(answers))
+    return Response(content=_plan_text(plan), media_type="text/plain; charset=utf-8",
+                    headers={"content-disposition":
+                             f'attachment; filename="routine-lab-{plan.profile_signature}.txt"'})
+
+
+@app.get("/account/plan.pdf", response_class=HTMLResponse)
+async def plan_pdf(request: Request) -> Response:
+    """PDF export, printed from the same text as the `.txt` by macOS' `textutil`.
+
+    Degrades rather than fails, and the degradation is a redirect to the text export rather
+    than a 200 with a text body under a PDF filename: a member who downloads "plan.pdf" and
+    gets plain text in a `.pdf` has an unopenable file and no explanation. A redirect gives
+    them the same content with the right name and the right type.
+
+    A funnel's dependency on a system binary is the kind of thing that is fine until the day
+    it is a 500 on a page a paying member needs.
+    """
+    row = billing_store.get_subscription(get_visitor(request))
+    if row is None:
+        return RedirectResponse(url="/dashboard", status_code=302)
+    answers, _note = _stored_answers(row)
+    if not answers:
+        return RedirectResponse(url="/account/plan.txt", status_code=302)
+    plan = build_plan(profile_from_answers(answers))
+    import shutil
+    import subprocess
+    import tempfile
+    textutil = shutil.which("textutil")
+    if not textutil:
+        return RedirectResponse(url="/account/plan.txt", status_code=302)
+    with tempfile.TemporaryDirectory() as workdir:
+        source = Path(workdir) / "plan.txt"
+        target = Path(workdir) / "plan.pdf"
+        source.write_text(_plan_text(plan), encoding="utf-8")
+        try:
+            await anyio.to_thread.run_sync(lambda: subprocess.run(
+                [textutil, "-convert", "pdf", "-output", str(target), str(source)],
+                check=True, capture_output=True, timeout=30))
+            body = target.read_bytes()
+        except Exception as exc:  # noqa: BLE001 - any printer failure ends the same way
+            log.warning("pdf export fell back to text: %s", exc)
+            return RedirectResponse(url="/account/plan.txt", status_code=302)
+    return Response(content=body, media_type="application/pdf",
+                    headers={"content-disposition":
+                             f'attachment; filename="routine-lab-{plan.profile_signature}.pdf"'})
+
+
+def _plan_text(plan: Plan) -> str:
+    """The artefact as a printable document. One builder, used by both export routes, so the
+    PDF and the text file cannot describe the plan differently."""
+    lines = [
+        plan.headline,
+        "=" * len(plan.headline),
+        "",
+        plan.summary,
+        "",
+        plan.coach_note,
+        "",
+        f"{plan.days_per_week} training days &middot; {plan.session_minutes} minutes &middot; "
+        f"{plan.split_label}".replace("&middot;", "-"),
+        "",
+    ]
+    for day in plan.days:
+        marker = "" if day.is_training_day else "  (recovery day)"
+        lines.append(f"{day.day}{marker}")
+        lines.append("-" * (len(day.day) + len(marker)))
+        lines.append(f"  {day.session.name}, {day.session.minutes} min")
+        for label, minutes in day.session.blocks:
+            lines.append(f"    - {minutes}m  {label}")
+        lines.append(f"  Effort: {day.session.rpe_guide}")
+        lines.append(f"  If it slips: {day.session.fallback}")
+        lines.append("  Meals:")
+        for slot, ideas in day.meal_structure:
+            lines.append(f"    {slot}: {ideas}")
+        lines.append(f"  Log: {day.focus_metric}")
+        lines.append("")
+    lines += ["What you track", "-" * 12, ""]
+    for label, target, why in plan.metrics:
+        lines += [f"{label}: {target}", f"  {why}", ""]
+    lines += ["Your fallback rule", "-" * 18, plan.fallback_rule, "",
+              f"Plan reference {plan.profile_signature}"]
+    return "\n".join(lines) + "\n"
+
+
+@app.post("/account/cancel", response_class=HTMLResponse)
+async def account_cancel(request: Request) -> HTMLResponse:
+    """One click, executed, then confirmed, and only then the offer (§2.3).
+
+    Renders its own confirmation instead of redirecting, because the rule is that the
+    cancellation is *done* before persuasion appears. A redirect would put the save offer on a
+    page rendered before the outcome existed, which is the interception the spec bans.
+    """
+    visitor_key = get_visitor(request)
+    # `cancel_now` already reports a refused cancellation as `done=False` and swallows the
+    # processor's `StripeError` to do it, so nothing on this path should raise on the provider's
+    # behalf. The one gap is a service whose client is not the one `cancel_now` holds: here the
+    # exception would escape and 500 a member who is, in fact, still subscribed. Rendered through
+    # the ordinary not-cancelled shape rather than a crash page, because the honest sentence
+    # already exists and a traceback is not it.
+    try:
+        result = await anyio.to_thread.run_sync(
+            lambda: billing.cancel_now(visitor_key=visitor_key))
+    except stripe_billing.StripeError as exc:
+        log.error("cancel raised for %s: %s", visitor_key, exc)
+        failed_row = billing_store.get_subscription(visitor_key)
+        result = billing_module.failure_result(
+            settings, exc,
+            access_until=billing.access_until(failed_row) if failed_row else "")
+    row = billing_store.get_subscription(visitor_key) or {}
+    if result.done:
+        store.append_event(
+            visitor_key=visitor_key, status="cancelled",
+            answers=form_answers(answers_for(request)),
+            step=len(QUESTIONS) + 2, plan_source="cancel",
+            offer_id=OFFER_ID, user_agent=request.headers.get("user-agent", ""))
+    return templates.TemplateResponse(
+        request, "cancel_done.html",
+        page_context(request, result=result, email=row.get("email", ""),
+                     menu=save_offer.offer_menu(settings, billing.copy(row))),
+    )
+
+
+@app.post("/account/cancel/offer", response_class=HTMLResponse)
+async def cancel_offer(request: Request, offer: str = Form("")) -> HTMLResponse:
+    """Act on a save-offer choice. Every option here is an opt-back-in.
+
+    An unknown or unconfigured value falls through to "stay cancelled" rather than 422ing.
+    Being unhelpful to someone who has just cancelled is the failure this screen cannot
+    afford, and the outcome is the state they were already in.
+
+    A processor rejection reaches here as an exception rather than as an outcome, and 500ing
+    on it is the one wrong answer available: the customer has *already* cancelled, so a crash
+    page tells someone who pressed Cancel that the page is broken and leaves them to guess
+    whether they are subscribed. `offer_done.html` renders the outcome it is handed, so the
+    rejection renders as its own failure copy through the same template, and the row stays
+    cancelled either way.
+    """
+    visitor_key = get_visitor(request)
+    try:
+        outcome = await anyio.to_thread.run_sync(
+            lambda: billing.accept_offer(visitor_key=visitor_key, key=offer))
+    except stripe_billing.StripeError as exc:
+        log.error("save offer %s raised for %s: %s", offer, visitor_key, exc)
+        return templates.TemplateResponse(
+            request, "offer_done.html",
+            page_context(request, outcome=save_offer.Outcome(
+                event="none",
+                headline="That offer could not be applied.",
+                detail=("Your cancellation still stands and nothing will be charged. We could "
+                        "not make the change on our side, so nothing has been sold to you that "
+                        "is not really in place. Go back and pick another option, or just stay "
+                        "cancelled."),
+                fields={})))
+    if outcome is None:
+        # Nothing was accepted, so nothing may be *reported* as accepted, and re-cancelling
+        # here would log a second cancellation for an account that was already cancelled
+        # before this request arrived. State the existing state and keep the menu live.
+        row = billing_store.get_subscription(visitor_key)
+        already = bool(row) and row.get("status") in (
+            "cancelled_at_period_end", "canceled")
+        return templates.TemplateResponse(
+            request, "cancel_done.html",
+            page_context(
+                request,
+                result=billing_module.CancelResult(
+                    done=already,
+                    headline="Already cancelled." if already
+                    else "Cancelled. Nothing more will be charged.",
+                    detail="Nothing was changed by that, and no offer has been applied.",
+                    processor_ok=True,
+                    access_until=billing.access_until(row) if row else "")
+                if already else billing.cancel_now(visitor_key=visitor_key),
+                email=(row or {}).get("email", ""),
+                menu=save_offer.offer_menu(settings, billing.copy(row or {}))),
+        )
+    return templates.TemplateResponse(
+        request, "offer_done.html", page_context(request, outcome=outcome))
+
+
+@app.get("/account/survey", response_class=HTMLResponse)
+async def survey_form(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request, "survey.html",
+        page_context(request, headline=save_offer.SURVEY_HEADLINE,
+                     reasons=save_offer.SURVEY_REASONS,
+                     second_question="What would have made you stay? (optional)",
+                     chosen="", note=""),
+    )
+
+
+@app.post("/account/survey", response_class=HTMLResponse)
+async def survey_submit(request: Request, reason: str = Form(""),
+                        note: str = Form("")) -> HTMLResponse:
+    """Optional, never blocking. An empty submit is a complete answer."""
+    await anyio.to_thread.run_sync(
+        lambda: billing.record_survey(visitor_key=get_visitor(request), reason=reason.strip(),
+                                      note=note.strip()))
+    return templates.TemplateResponse(
+        request, "offer_done.html",
+        page_context(request, outcome=save_offer.Outcome(
+            event="survey_reason",
+            headline="Thank you, that is enough.",
+            detail="Two answers recorded, nothing changed on your account, and no email you "
+                   "did not ask for. Your plan stays available until the access date on your "
+                   "account page.",
+            fields={})),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Processor webhook
+# ---------------------------------------------------------------------------
+
+@app.post("/webhooks/stripe")
+async def stripe_webhook(request: Request) -> Response:
+    """Receive one Stripe event. Signature first, always.
+
+    Three behaviours worth knowing, because each is a place a rewrite gets it wrong:
+
+    * The **raw body** is verified before it is parsed. Verifying a re-serialised copy fails
+      intermittently and mysteriously, since whitespace is part of what was signed.
+    * With no `STRIPE_WEBHOOK_SECRET_FUNNEL` the handler accepts **unsigned** posts and logs a
+      warning. That is the state the spec warns about (`§2.4`), and it is tolerable only while
+      no automated action hangs off the webhook: a spoofed `invoice.paid` currently moves a
+      status column and nothing else. `/health` names it instead of hiding it.
+    * An event whose type this lane ignores returns 200, not 500. Stripe retries a 5xx
+      indefinitely, so an unusable event type answered with an error becomes a permanent loop
+      that looks like an outage.
+    """
+    body = await request.body()
+    signature = request.headers.get("stripe-signature", "")
+    keys = stripe_billing.FunnelKeys.load()
+
+    if keys.webhook_secret:
+        try:
+            stripe_billing.verify_signature(body, signature, keys.webhook_secret)
+        except stripe_billing.StripeError as exc:
+            log.warning("rejected webhook: %s", exc)
+            return Response(content=str(exc), status_code=400, media_type="text/plain")
+    elif not settings.charges_enabled:
+        log.warning("STRIPE_WEBHOOK_SECRET_FUNNEL unset: accepting an unsigned webhook in "
+                    "rehearsal, where no automated action depends on it")
+    else:
+        # Charges are live and the secret is absent: accept, because the alternative is
+        # refusing every event and desynchronising the very subscriptions that are now
+        # real. Say so in the response so a dashboard test shows up as a visible reason.
+        log.error("charges are enabled but STRIPE_WEBHOOK_SECRET_FUNNEL is unset: this "
+                  "webhook is unsigned and can be forged by anyone who can reach it")
+
+    try:
+        event = json.loads(body or b"{}")
+    except json.JSONDecodeError:
+        return Response(content="body is not JSON", status_code=400,
+                        media_type="text/plain")
+
+    billing.client = billing_client()
+    try:
+        reason = billing.handle_event(event)
+    except stripe_billing.StripeError as exc:
+        # A failure we cause (bad state, unreachable processor) is a 5xx on purpose: this is
+        # the one case where a retry from Stripe is the right medicine.
+        log.error("webhook %s failed: %s", event.get("type"), exc)
+        return Response(content=str(exc), status_code=502, media_type="text/plain")
+    log.info("webhook %s -> %s", event.get("type"), reason)
+    return JSONResponse({"received": True, "result": reason})
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle notices
+# ---------------------------------------------------------------------------
+
+@app.post("/ops/send-notices", response_class=HTMLResponse)
+async def send_notices(request: Request) -> JSONResponse:
+    """Send the renewal notices that are due (day −2, §2.1).
+
+    A route rather than a cron job inside the app, because Phase 2 has no scheduler and a
+    scheduler with no operator surface hides whether it ran. A timer, a `curl`, or a human on a
+    renewal morning all reach the same idempotent function, which records each send before
+    attempting it and therefore cannot tell a customer about the same charge twice.
+    """
+    billing.client = billing_client()
+    results = await anyio.to_thread.run_sync(billing.send_due_notices)
+    return JSONResponse({
+        "sent": len([result for result in results if result.ok]),
+        "failed": len([result for result in results if not result.ok]),
+        "transport": mailer.transport,
+        "detail": [f"{result.to}: {result.transport} {result.detail}" for result in results],
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -580,6 +1272,60 @@ def plan_audit() -> list[str]:
         return [f"audit raised {type(exc).__name__}: {exc}"]
 
 
+def billing_readiness(state: dict[str, Any], copy_obj: Copy) -> list[str]:
+    """What must be settled before this funnel faces traffic, as sentences.
+
+    Deliberately not a reworded duplicate of `/health`'s markup: the page renders this same
+    list, and `tests/test_billing.py` asserts on the *reasons* rather than on page text. A test
+    that grepped the template for "Billing readiness: clean" would happily pass while the
+    readiness function drifted, which is the specific way an ops page becomes decoration.
+    """
+    issues: list[str] = []
+    if state.get("error"):
+        issues.append(str(state["error"]))
+    if state.get("charges_enabled") and not state.get("key_present"):
+        issues.append(
+            "FUNNEL_CHARGES_ENABLED is true but STRIPE_SECRET_KEY_FUNNEL is unset, so "
+            "checkout cannot take a card. Either set the key or switch charges off.")
+    if state.get("charges_enabled") and not state.get("webhook_secret_present"):
+        issues.append(
+            "Charges are enabled with STRIPE_WEBHOOK_SECRET_FUNNEL unset, so this handler "
+            "accepts unsigned events: anyone who can reach the URL can mark a subscription "
+            "paid or cancelled.")
+    if state.get("key_present") and state.get("acct_type") not in ("standard", "express"):
+        issues.append(
+            f"The funnel secret key decoded as account type {state.get('acct_type')!r}, which "
+            "is not a standard funnel account. Confirm it is not the B2B account's key.")
+    if state.get("processor") and state["processor"].get("reachable") is False:
+        issues.append(f"The payment provider rejected our key: {state['processor'].get('error')}")
+    if (state.get("processor") and state.get("charges_enabled")
+            and state["processor"].get("payments_enabled") is False):
+        issues.append(
+            "The merchant account has card payments disabled, so every checkout will fail "
+            "even though our side is configured.")
+    if not settings.support_email:
+        issues.append(
+            "FUNNEL_SUPPORT_EMAIL is empty, so receipt and cancellation emails carry no reply "
+            "address. Checklist 5 asks for a monitored one, and a receipt nobody can answer "
+            "turns a refund request into a dispute.")
+    if not state.get("discount_coupon_configured"):
+        issues.append(
+            "FUNNEL_DISCOUNT_COUPON_ID is unset, so save-offer option C (half price for two "
+            "months) is hidden from the cancel menu. That is the correct behaviour, not a "
+            "bug: an offer the processor cannot apply is a promise the invoice breaks.")
+    # Read off the flag rather than off `copy_obj.renewal_is_real`, which is what this check used
+    # to test, and which could never fire: every caller passes `build_copy(settings)` with no
+    # subscription, so `renewal_is_real` was False for the readiness copy in *every* configuration,
+    # armed or not, and the issue was decided by `client_active` alone. That made
+    # `test_no_readiness_findings_when_correctly_configured` fail on a correctly configured funnel
+    # and made the warning itself unfalsifiable. The flag says what the sentence claims.
+    if state.get("client_active") and not SUBSCRIPTION_READ:
+        issues.append(
+            "Charges are live but no subscription has been read from the provider yet in this "
+            "process, so every renewal date shown so far is an estimate.")
+    return issues
+
+
 @app.get("/health", response_class=HTMLResponse)
 async def health(request: Request) -> HTMLResponse:
     """Guardrail state on one screen: copy scan, disclosure coverage, model routing.
@@ -596,11 +1342,27 @@ async def health(request: Request) -> HTMLResponse:
             routing = router.get_router().describe()
         except Exception as exc:  # a dark router is a state to display, not a 500
             routing = {"error": f"{type(exc).__name__}: {exc}"}
+
+    billing.client = billing_client()
+    try:
+        billing_state = billing.status()
+    except stripe_billing.StripeMisconfigured as exc:
+        # A B2B key in the funnel slot is a finding to display, not a page that fails: the
+        # operator looking at this screen is exactly the person who needs to be told which key
+        # is wrong, and a 500 shows them a traceback instead.
+        billing_state = {"charges_enabled": settings.charges_enabled, "client_active": False,
+                         "rehearsal_reason": str(exc), "key_present": True, "key_type": "?",
+                         "acct_type": "?", "webhook_secret_present": False, "counts": {},
+                         "offer_counts": {}, "mail_transport": mailer.transport,
+                         "discount_coupon_configured": bool(settings.discount_coupon_id),
+                         "offer_options": (), "error": str(exc)}
     return templates.TemplateResponse(
         request, "health.html",
         page_context(
             request, copy_obj=copy_obj,
             violations=guardrail_scan(copy_obj),
+            billing=billing_state,
+            billing_issues=billing_readiness(billing_state, copy_obj),
             # The health page names the banned categories in its own explanation, which is
             # exactly what the scan forbids. So the sentence is assembled from the term list
             # at runtime: one source of truth, and the page proves it is reading that source.

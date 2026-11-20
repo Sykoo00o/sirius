@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Cancel &middot; {{ brand }}{% endblock %}
+
+{% block main %}
+{#
+  The click lands here. `LANE_C_PHASE0_STEP1-2.md` §2.3, rule 1: **action precedes
+  persuasion**. The handler had already called the processor and written the local state before
+  this page was rendered, so the first words on this screen describe a completed fact.
+
+  Three things this template must not do:
+
+  * Ask a question. No "are you sure?", no dropdown, no "tell us why" field above the
+    confirmation. Anything that must be answered before the cancel runs is obstruction, and
+    obstruction is what produces fraud flags rather than mere churn.
+  * Offer a save option as the affirmative-looking action. The offers below are opt-back-ins
+    against a baseline that is already "cancelled", and the D-shaped "no thanks" state is what
+    the account is in right now, which is why the confirmation repeats itself before any
+    offer appears.
+  * Hide what happened. The access date and the last charge are stated here as well as in the
+    email, because a customer who cannot re-read the outcome starts the flow again.
+#}
+<section class="mx-auto max-w-copy px-4 pt-8 pb-16">
+
+  {% if not result.done %}
+    <p class="eyebrow">Not cancelled</p>
+    <h1 class="band-heading mt-4">{{ result.headline }}</h1>
+    <p class="mt-3 text-muted leading-relaxed">{{ result.detail }}</p>
+    <div class="mt-6 flex flex-wrap gap-3">
+      <form method="post" action="/account/cancel">
+        <button type="submit" class="btn-primary px-6 py-3.5 font-semibold">Try cancelling again</button>
+      </form>
+      <a href="/dashboard" class="inline-flex items-center px-6 py-3.5 font-semibold rounded-2xl border border-line bg-white">Back to my account</a>
+    </div>
+  {% else %}
+
+  <div data-section="cancel-confirmed" class="rounded-3xl border-2 border-moss/40 bg-moss-soft p-6 sm:p-7">
+    <p class="eyebrow eyebrow-moss">Done</p>
+    <h1 class="band-heading mt-3">{{ result.headline }}</h1>
+    <p class="mt-3 leading-relaxed">{{ result.detail }}</p>
+    <dl class="mt-5 grid grid-cols-2 gap-3 text-sm">
+      <div class="rounded-2xl bg-white/70 border border-line px-4 py-3">
+        <dt class="text-[11px] uppercase tracking-wide text-muted">Access runs until</dt>
+        <dd class="mt-0.5 font-bold text-base">{{ result.access_until }}</dd>
+      </div>
+      <div class="rounded-2xl bg-white/70 border border-line px-4 py-3">
+        <dt class="text-[11px] uppercase tracking-wide text-muted">Further charges</dt>
+        <dd class="mt-0.5 font-bold text-base">None</dd>
+      </div>
+    </dl>
+    <p class="mt-4 text-xs text-muted leading-relaxed">
+      A confirmation is on its way to {{ email or 'the email on your account' }}. Your plan
+      stays exportable, and nothing about the days you paid for has been taken away.
+    </p>
+  </div>
+
+  <a href="/dashboard" class="mt-6 inline-block text-sm text-muted underline decoration-line underline-offset-4 hover:text-ink">Back to my account, unchanged</a>
+
+  {% if menu.any_live %}
+    {# --- the save-offer menu: skippable, and skippable means the page above is already
+       the whole story. One offer per cancel event, so this is one menu, never a sequence:
+       a maze of successive retention screens is what the corpus calls a Roach Motel. --- #}
+    <div class="mt-10" data-section="save-offer">
+      <h2 class="band-heading">One thing, then you are on your way</h2>
+      <p class="mt-1.5 text-sm text-muted leading-relaxed">
+        You are cancelled either way. If any of these suits you better, take it; if none do,
+        there is nothing left to do here.
+      </p>
+
+      <ul class="mt-5 space-y-3">
+        {% for offer in menu.offers %}
+          <li class="surface-float rounded-3xl bg-white p-5">
+            <h3 class="font-semibold leading-snug">{{ offer.title }}</h3>
+            <p class="mt-1.5 text-sm text-muted leading-relaxed">{{ offer.detail }}</p>
+            <form method="post" action="/account/cancel/offer" class="mt-4">
+              <input type="hidden" name="offer" value="{{ offer.key }}">
+              <button type="submit"
+                      class="rounded-2xl border-2 border-ember/40 bg-ember-soft px-4 py-2.5 text-sm font-semibold text-ember-dark hover:border-ember">
+                {{ offer.verb }}
+              </button>
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+
+      <form method="post" action="/account/cancel/offer" class="mt-4">
+        <input type="hidden" name="offer" value="keep_cancelled">
+        <button type="submit"
+                class="w-full rounded-2xl border border-line bg-white px-5 py-3.5 text-base font-semibold text-muted hover:text-ink">
+          No thanks, keep me cancelled
+        </button>
+      </form>
+      <p class="mt-2 text-xs text-muted">
+        That button does the same thing as doing nothing. It is here so that doing nothing is
+        not the only way to say no.
+      </p>
+    </div>
+  {% else %}
+    <p class="mt-10 text-sm text-muted leading-relaxed">
+      That is everything. Your plan stays on your account page until
+      {{ result.access_until }}.
+    </p>
+  {% endif %}
+
+  {% endif %}
+</section>
+{% endblock %}

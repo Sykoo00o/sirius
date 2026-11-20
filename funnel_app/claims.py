@@ -107,6 +107,17 @@ REQUIRED_DISCLOSURES: tuple[tuple[str, str], ...] = (
 )
 
 
+#: Checklist 1, verbatim: the entry price, the length, the recurring price and the fact
+#: that it stops when the customer says stop. Named separately from `Slots` because the
+#: payment email has to carry this exact sentence, and a sentence assembled from a
+#: settings object in an email builder is a sentence that can drift from the one on the
+#: checkout screen. One builder, two call sites, and the existing checkout test already
+#: pins the wording.
+def price_line(slots: "Slots") -> str:
+    return (f"{slots.trial_amount} today for {slots.trial_days} days, then "
+            f"{slots.rebill_per_month} until you cancel")
+
+
 @dataclass(frozen=True)
 class Slots:
     """Display strings for the two amounts, so disclosure text is assembled from data."""
@@ -194,8 +205,7 @@ def rendered_disclosures(slots: Slots) -> list[tuple[str, str, str]]:
     return [
         (
             "price_line",
-            f"{slots.trial_amount} today for {slots.trial_days} days, then "
-            f"{slots.rebill_per_month} until you cancel",
+            price_line(slots),
             "checkout card, adjacent to the payment button",
         ),
         (

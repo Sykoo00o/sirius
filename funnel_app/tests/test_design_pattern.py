@@ -35,12 +35,14 @@ FUNNEL_ROOT = Path(__file__).resolve().parents[1]
 if str(FUNNEL_ROOT) not in sys.path:
     sys.path.insert(0, str(FUNNEL_ROOT))
 
-# The cookie-jar wrapper lives in the flow suite. Imported by path rather than copied, because
-# the traps it documents (`client.cookies` reading empty while the transport holds its own jar;
-# httpx binding a positional `data=` onto `files=`) are the kind that, once re-typed, produce a
-# new plausible-looking app theory instead of the same solved one.
+# The cookie-jar wrapper and the 12-answer walk live in `conftest.py`, shared by every suite
+# that drives the funnel. Imported by path rather than relied on as a pytest-injected `conftest`
+# name, because this module also needs them at import time. The traps they document
+# (`client.cookies` reading empty while the transport holds its own jar; httpx binding a
+# positional `data=` onto `files=`) are the kind that, once re-typed, produce a new
+# plausible-looking app theory instead of the same solved one.
 _spec = importlib.util.spec_from_file_location(
-    "test_funnel_flow", FUNNEL_ROOT / "tests" / "test_funnel_flow.py")
+    "funnel_conftest", FUNNEL_ROOT / "tests" / "conftest.py")
 assert _spec and _spec.loader
 _flow = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_flow)
@@ -66,10 +68,15 @@ def client(tmp_path, monkeypatch):
     """Same isolated app as the flow suite: a shared dirty database makes the progress guard
     redirect, and a redirected quiz step looks like a missing progress bar."""
     monkeypatch.setenv("FUNNEL_DB_PATH", str(tmp_path / "design.sqlite3"))
+    monkeypatch.setenv("FUNNEL_BILLING_DB_PATH", str(tmp_path / "design_billing.sqlite3"))
     monkeypatch.setenv("FUNNEL_SESSION_SECRET", "test-secret-value")
     monkeypatch.setenv("FUNNEL_PREVIEW_MODE", "builder")
+    # Cleared as a set, and it must include the Phase 2 modules: `main` reads its config at
+    # import, so a module left in `sys.modules` keeps the *previous* test's database path, and
+    # a design test then renders a page built from a file in somebody else's tmp directory.
     for name in list(sys.modules):
-        if name in {"main", "config", "storage", "session"}:
+        if name in {"main", "config", "storage", "session", "billing", "billing_store",
+                    "mailer", "funnel_copy", "stripe_billing", "save_offer"}:
             del sys.modules[name]
     import main
 
