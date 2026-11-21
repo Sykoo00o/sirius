@@ -255,6 +255,40 @@ curl -s -X POST "$BASE/webhooks/stripe" -H 'Content-Type: application/json' -d '
 ls /var/lib/funnel-app/*.sqlite3   # both files, created at boot, not on first customer
 ```
 
+Persistence, verified rather than asserted. On the real deploy the billing DB came through a
+`systemctl restart` **byte-identical (same md5), same inode, mtime still 10 minutes older than the
+restart** — so it was reopened, not recreated. Note that `-shm` and `-wal` siblings *do* get fresh
+mtimes: that is WAL activity, and if you watch mtimes alone you will read a healthy restart as a
+rewritten database. Compare a checksum, or the inode.
+
+An absent `outbox/` directory after this walk is correct, not a missing mount: `Mailer._write_outbox`
+calls `mkdir(parents=True)` on the first message, and a quiet-day `/ops/send-notices` sends none.
+Proof it can create one under `ProtectSystem=strict` costs one in-process line:
+
+```bash
+cd /home/ubuntu/Sirius/funnel_app
+sudo -u ubuntu .venv/bin/python - <<'PY'
+import mailer, config                       # cwd is on sys.path, so no insert needed
+s = config.FunnelSettings.from_env()
+r = mailer.Mailer(s).send(mailer.Email(to="ops@example.com",
+                                       subject="outbox write probe",
+                                       text="probe"))   # the field is `text`; there is no `body`
+print(r.transport, r.ok, r.detail)
+PY
+# expect: outbox True /var/lib/funnel-app/outbox/<stamp>-message-ops_example_com.eml
+# then delete the probe file. A permissions surprise here surfaces on a test mail, not at 3am
+# during a refund, which is the whole point of sending one now.
+```
+
+(A heredoc, not `python -c` with backslash continuations: a `;` before a continuation is a
+SyntaxError, and `print(a, b, c)` under a `sep=` reads its third argument as the separator.)
+
+`systemd-analyze verify` passing on all five units is the last green tick worth reading carefully,
+because it is the one that nearly did not mean anything. On the first apply it reported clean, then
+printed a real `Invalid URL, ignoring` finding, because the check graded `grep`'s exit status rather
+than verify's output. A check that reports success on the exact output it exists to catch is worse
+than no check, since it is believed.
+
 ## Step 5 — Cloudflare Tunnel
 
 Give the funnel its **own hostname**, not a path prefix on the engine's. `POST /webhooks/stripe`

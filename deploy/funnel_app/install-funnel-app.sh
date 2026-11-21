@@ -395,11 +395,18 @@ else
   systemctl start funnel-app.service
   ok "started funnel-app.service (8090 was free)"
 fi
-# The counter a green "active" hides: a unit that failure-looped before booting right keeps its
-# NRestarts, so "50" is the residue of a config error and not a property of the running process.
-# Read once at startup so it lands beside the "started" line instead of being missed.
-say "  info      NRestarts at startup: $(systemctl show -p NRestarts --value funnel-app.service) \
-(reset with: systemctl reset-failed funnel-app)"
+# Printed as an observation, not a verdict, and the reason is worth keeping. The first version of
+# this line claimed the counter "survives a successful restart" and skipped `reset-failed` for that
+# reason. Measured one commit later, in the very apply that proved the fix: the unit had flapped 50
+# times under the untokenised WorkingDirectory, and after this restart reported 0. `--value` reads
+# the live unit, and a restart clears what the start-failure rate limiter was holding.
+#
+# So the number printed here says roughly nothing about the history, and the deploy log — not this
+# field — is where "it flapped 50 times before the fix" survives. Kept because it is cheap and
+# because a *non-zero* figure in a steady state is still meaningful: if this ever reads 7 on a
+# restart you did not cause, something is failing and recovering on its own.
+say "  info      NRestarts after restart: $(systemctl show -p NRestarts --value funnel-app.service) \
+(0 here is not evidence: a restart clears it)"
 say ""
 say "next: systemctl status funnel-app --no-pager && curl -s http://127.0.0.1:8090/health | head -40"
 say "then: point the Cloudflare Tunnel hostname at 127.0.0.1:8090 and register the Stripe webhook"
