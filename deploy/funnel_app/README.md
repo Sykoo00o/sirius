@@ -306,14 +306,28 @@ Add, before the catch-all (full commentary in `cloudflared-ingress.yml`):
 ```yaml
   - hostname: funnel.example.com
     service: http://127.0.0.1:8090
-    keepAliveTimeouts: 90s
+    originRequest:
+      keepAliveTimeout: 90s
 ```
 
-Then point DNS at the tunnel and bounce it:
+`keepAliveTimeout` sits **under `originRequest`** and is **singular**. The flat plural
+`keepAliveTimeouts: 90s` this runbook shipped with is rejected by cloudflared 2026.11.1 as an unused
+key, and the rejection is the treacherous kind: `ingress validate` prints a warning but **exits 0**,
+and `ingress rule` still matches the hostname and routes to 8090, so the tunnel works while your
+tuning quietly never applied. That is also why the check below captures to a file and tests the
+exit code plus the `OK` line: `validate ... | grep -v '^$' && ...` grades grep, and a grep for the
+word "valid" matches the string "Validate the ingress configuration" in a usage-error dump.
 
 ```bash
 sudo cloudflared tunnel route dns <TUNNEL_NAME_OR_UUID> funnel.example.com
-sudo cloudflared tunnel ingress validate      # refuses a config with no catch-all
+# `--config` belongs to the `tunnel` verb, not to `ingress validate` (a flag error there prints a
+# usage dump and still exits 0). Capture, then judge on rc AND the success line.
+OUT=$(mktemp); sudo cloudflared tunnel --config /etc/cloudflared/config.yml ingress validate >"$OUT" 2>&1
+rc=$?; cat "$OUT"
+[ "$rc" -eq 0 ] && grep -qiE '^OK|valid configuration' "$OUT" && echo PASS || echo "FAIL rc=$rc"
+# a broken ingress must print rc!=0 — if your guard passes that too, it is not a guard:
+#   printf '...ingress:\n  - service: not-a-url\n' > /tmp/x.yml
+#   sudo cloudflared tunnel --config /tmp/x.yml ingress validate; echo "rc=$? (expect non-zero)"
 sudo cloudflared tunnel ingress rule https://funnel.example.com/health   # must print service: http://127.0.0.1:8090
 sudo systemctl restart cloudflared
 ```

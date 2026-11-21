@@ -25,9 +25,17 @@ ingress:
   # --- NEW: the Lane C funnel -------------------------------------------------
   - hostname: funnel.example.com          # <-- replace, and set FUNNEL_PUBLIC_URL to match
     service: http://127.0.0.1:8090
-    # Keep the connect timeout short. A funnel that is not answering should fail fast and let
-    # Cloudflare serve its own error page rather than hold a customer's card screen open.
-    keepAliveTimeouts: 90s
+    # Under originRequest, and SINGULAR: `keepAliveTimeout`. Two earlier spellings in this very file
+    # were wrong and cloudflared told us so only as a soft "unused keys" warning that still exits 0:
+    #   * flat on the rule (`keepAliveTimeouts: 90s`) — not a field of IngressRule;
+    #   * `keepAliveTimeouts` (plural) anywhere — OriginRequestConfig has no plural field.
+    # Verified against cloudflared 2026.11.1: `cloudflared tunnel --config <f> ingress validate`
+    # prints `OK` for the form below and "field ... not found in type config.OriginRequestConfig" for
+    # the others. A soft warning that exits 0 is the dangerous kind of wrong: `ingress rule` still
+    # matches the host and routes correctly with the field ignored, so the tunnel WORKS and nothing
+    # screams that your keep-alive tuning silently never applied.
+    originRequest:
+      keepAliveTimeout: 90s
 
   # Catch-all, must remain the final rule.
   - service: http_status:404

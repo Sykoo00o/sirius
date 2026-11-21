@@ -1757,6 +1757,36 @@ def test_main_refuses_an_unrecognised_day_word(sheet, capsys):
     assert "YYYY-MM-DD" in err, "the error must state the accepted forms, not just reject"
 
 
+def test_cloudflared_ingress_template_uses_a_valid_keepalive_field():
+    """`keepAliveTimeouts: 90s`, flat on the rule, is what this deploy artifact shipped with, and
+    cloudflared 2026.11.1 does not have that field: validate prints
+    "field keepAliveTimeouts not found in type config.OriginRequestConfig", routes the host anyway,
+    and STILL EXITS 0. A soft warning that does not change the exit code is the one class of config
+    error that survives a careful deploy, because `ingress rule` matches and the tunnel works, so the
+    keep-alive tuning silently never applies and nothing on the box says so. Parsed (not grepped)
+    so a rename in a comment can't satisfy it, and the funnel rule located by service, not position,
+    so prepending an engine rule to the example does not hide the finding.
+
+    The field that IS valid: `keepAliveTimeout` (singular), nested under `originRequest` — confirmed
+    against the real binary, whose validator prints `OK` for it and rejects the flat and plural
+    spellings."""
+    import yaml
+    text = (REPO_ROOT / "deploy" / "funnel_app" / "cloudflared-ingress.yml").read_text(encoding="utf-8")
+    rules = yaml.safe_load(text)["ingress"]
+    funnel = [r for r in rules
+              if isinstance(r, dict) and r.get("service") == "http://127.0.0.1:8090"]
+    assert len(funnel) == 1, funnel
+    rule = funnel[0]
+    assert "keepAliveTimeouts" not in rule, (
+        f"flat plural keep-alive field is ignored by cloudflared (exits 0, no effect): {rule}")
+    origin = rule.get("originRequest") or {}
+    assert "keepAliveTimeout" in origin, (
+        "the valid form is originRequest.keepAliveTimeout (singular); "
+        f"found originRequest={origin!r}, top-level keys={sorted(rule)}")
+    # A duration, because the schema wants a duration string and `90` (int, =90ns) is a footgun.
+    assert origin["keepAliveTimeout"].endswith("s"), origin["keepAliveTimeout"]
+
+
 @pytest.mark.parametrize("doc", ["deploy/funnel_app/README.md", "funnel_app/README.md",
                                  "funnel_app/PHASE3_MANUAL_TEST.md"])
 def test_runbook_fenced_blocks_are_balanced(doc: str):
