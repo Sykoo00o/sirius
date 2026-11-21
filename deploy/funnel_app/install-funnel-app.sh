@@ -166,13 +166,21 @@ if [ -n "$PORT_TOOL" ]; then
   else
     ok "port 8090 free"
   fi
-  for other in 8000 3100; do
-    if port_busy "$other"; then
-      ok "port $other busy with an existing service (untouched by this deploy)"
-    else
-      warn "port $other is not listening; expected sirius-finance (8000) / compose-Caddy (3100) to be"
-    fi
-  done
+  # 8000 must be alive (it is sirius-finance) and 3100 is informational only: on the current host
+  # the compose `api` container is not running, so 3100 is legitimately absent and saying "expected
+  # to be listening" every deploy trains the operator to ignore the WARN. Absent 3100 is fine;
+  # present 3100 is also fine. Either way this deploy binds neither.
+  if port_busy 8000; then
+    ok "port 8000 live with sirius-finance (this deploy does not touch it)"
+  else
+    fail "port 8000 is not listening. sirius-finance should be; check
+            systemctl status sirius-finance  -- before adding a third service"
+  fi
+  if port_busy 3100; then
+    ok "port 3100 live (compose/Caddy stack, untouched by this deploy)"
+  else
+    say "  info      port 3100 not listening (compose api not running; normal on this host)"
+  fi
 fi
 
 # --- 6. units render and validate -----------------------------------------
@@ -189,8 +197,38 @@ for u in funnel-app.service funnel-notices.service funnel-notices.timer \
   if [ -s "$TMP/$u" ]; then ok "rendered $u"; else fail "$u failed to render"; fi
 done
 if command -v systemd-analyze >/dev/null 2>&1; then
-  systemd-analyze verify "$TMP/funnel-app.service" 2>&1 | grep -v '^$' \
-    && warn "systemd-analyze verify printed the above" || ok "systemd-analyze verify clean"
+  # All five units, not just the app: `funnel-metrics.service` is the one with a `--day yesterday`
+  # and a bash-free ExecStart, and a bad directive in a timer is invisible if only the app is fed
+  # to verify.
+  #
+  # Classify on the OUTPUT, never on the pipeline's exit status. The previous form piped verify
+  # into `grep -v '^$'`, so what `&&` tested was grep's status: on the real VPS, verify had printed
+  # "Command ... .venv/bin/python is not executable" and the script still reported "verify clean".
+  # A check that reports success on the exact output it exists to catch is worse than no check,
+  # because it is believed. Third-party noise (Ubuntu ships unit files with the executable bit set,
+  # which verify prints about) is filtered out of the *decision* but shown, so nothing is hidden.
+  VERIFY_OUT=$(systemd-analyze verify "$TMP"/funnel-app.service "$TMP"/funnel-notices.service \
+              "$TMP"/funnel-notices.timer "$TMP"/funnel-metrics.service \
+              "$TMP"/funnel-metrics.timer 2>&1 || true)
+  OURS=$(printf '%s\n' "$VERIFY_OUT" | grep -E "funnel-(app|notices|metrics)" | grep -v '^[[:space:]]*$' || true)
+  OTHERS=$(printf '%s\n' "$VERIFY_OUT" | grep -vE "funnel-(app|notices|metrics)" | grep -v '^[[:space:]]*$' || true)
+  if [ -n "$OTHERS" ]; then
+    say "  info      systemd-analyze also printed, about other units on this host:"
+    printf '%s\n' "$OTHERS" | sed 's/^/            /' | head -8
+  fi
+  if [ -n "$OURS" ]; then
+    # "Command X is not executable" is the expected state before Step 2 creates the venv, so it is
+    # a warn there and a fail at --apply time, where the venv must already exist.
+    if [ "$APPLY" = 1 ]; then
+      fail "systemd-analyze verify reported problems in our units:"
+      printf '%s\n' "$OURS" | sed 's/^/            /'
+    else
+      warn "systemd-analyze verify flagged our units (expected if the venv does not exist yet):"
+      printf '%s\n' "$OURS" | sed 's/^/            /'
+    fi
+  else
+    ok "systemd-analyze verify: no findings for the five funnel units"
+  fi
 else
   warn "systemd-analyze unavailable; unit syntax not machine-checked"
 fi
