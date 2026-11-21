@@ -42,22 +42,37 @@ that has no route to the host's loopback. Caddy stays off this path.
 | `cloudflared-ingress.yml` | merge into `/etc/cloudflared/config.yml` |
 | `install-funnel-app.sh` | run in place; no-arg mode changes nothing |
 
-The `.service` files are templates containing exactly two tokens, `@RUN_USER@` and `@VENV_PYTHON@`.
-Use `install-funnel-app.sh`, which substitutes and verifies them. If you install by hand, substitute
-both yourself (`sed -e "s|@RUN_USER@|sirius|g" -e "s|@VENV_PYTHON@|/opt/ghost-x2/funnel_app/.venv/bin/python|g"`)
-and confirm nothing is left:
+The `.service` files are templates carrying **three** tokens: `@RUN_USER@`, `@VENV_PYTHON@` and
+`@REPO_DIR@`. Use `install-funnel-app.sh`, which substitutes and verifies all three. Installing by
+hand means all three:
 
 ```bash
-grep -rn '@[A-Z_]*@' /etc/systemd/system/funnel-* || echo "clean: no unsubstituted tokens"
+sed -e "s|@RUN_USER@|ubuntu|g" \
+    -e "s|@VENV_PYTHON@|/home/ubuntu/Sirius/funnel_app/.venv/bin/python|g" \
+    -e "s|@REPO_DIR@|/home/ubuntu/Sirius|g" \
+    deploy/funnel_app/funnel-app.service > /tmp/funnel-app.service
+grep -n '@[A-Z_]*@' /tmp/funnel-app.service || echo "clean: no unsubstituted tokens"
 ```
 
-A literal `@VENV_PYTHON@` in `ExecStart` does **not** fail at `daemon-reload`, which accepts any
-ExecStart spelling; it fails at start as status **203/EXEC**, i.e. on the first restart after the
-one you checked. Those tokens sit on **six lines across three files** (`funnel-app.service`:
-`User=`, `Group=` and one `ExecStart=`; `funnel-metrics.service` and `funnel-notices.service`:
-`User=` and, in metrics only, one `ExecStart=`), and no `.timer` file carries either. Count with
-the grep above rather than a per-file mental model; the source files deliberately keep their
-comments free of token text so that grep cannot lie.
+**`@REPO_DIR@` exists because its absence was a real outage.** The first release tokenized only the
+user and the interpreter and hardcoded the repo path, so on a host where the checkout is not
+`/opt/ghost-x2` the unit failed at start with `status=200/CHDIR` ("Changing to the requested working
+directory failed") and restarted on a three-second loop. `sed` does not complain about a pattern it
+never matched, so the render step reported success either way.
+
+Each failure mode has its own status code, which is why the grep matters more than a successful
+`daemon-reload`: an unsubstituted `ExecStart` token is **203/EXEC**, a bad `WorkingDirectory` is
+**200/CHDIR**, a missing `EnvironmentFile` (no `-` prefix, on purpose) is a config error, and
+**none of them fail at `daemon-reload`**, which accepts almost any spelling. They fail at start,
+meaning on the first restart after the one you checked.
+
+Count with the grep rather than a per-file mental model: **11 token-bearing lines across three
+files** (six in `funnel-app.service`, four in `funnel-metrics.service`, one in
+`funnel-notices.service`; note `funnel-metrics.service`'s `ExecStart` carries two tokens on one
+line, so a token *count* and a line *count* differ), and no `.timer` carries any. The source files
+keep their comments free of token text so that grep cannot lie: a header naming a token in prose
+would make the check always fire, which is why `funnel-app.service` describes its tokens without
+spelling them.
 
 ## Step 1 — preflight (changes nothing)
 

@@ -24,8 +24,8 @@ Wants=funnel-app.service
 [Service]
 Type=oneshot
 User=@RUN_USER@
-WorkingDirectory=/opt/ghost-x2/funnel_app
-EnvironmentFile=-/opt/ghost-x2/funnel_app/.env
+WorkingDirectory=@REPO_DIR@/funnel_app
+EnvironmentFile=@REPO_DIR@/funnel_app/.env
 # The script finds `funnel_app/.env` from its own location, so the EnvironmentFile above is belt
 # and braces; what it cannot do is guess a database path that is not the default. Absolute paths
 # in .env are what make this line correct on the VPS.
@@ -35,7 +35,7 @@ EnvironmentFile=-/opt/ghost-x2/funnel_app/.env
 # systemd expands `%F` as its own specifier (a unit's filesystem root) before the shell sees it,
 # and GNU `date -d yesterday` does not exist on BSD. A unit that resolves to the wrong day exports
 # a confident, wrong row every morning and never complains. One token, no quoting, no specifier.
-ExecStart=@VENV_PYTHON@ /opt/ghost-x2/scripts/export_lane_c_metrics.py --day yesterday --fail-on-ceiling
+ExecStart=@VENV_PYTHON@ @REPO_DIR@/scripts/export_lane_c_metrics.py --day yesterday --fail-on-ceiling
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=funnel-metrics

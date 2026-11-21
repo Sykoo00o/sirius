@@ -189,13 +189,32 @@ if [ "$APPLY" = 1 ]; then
 fi
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
+# After rendering, no token may survive. This is the check that would have caught the bug this
+# script shipped with: @REPO_DIR@ was missing from the substitution list, so `WorkingDirectory`
+# kept a literal path that did not exist here and the unit failed at start as 200/CHDIR, while the
+# render step cheerfully reported five units rendered. `sed` does not error on a pattern it never
+# matched, so a missing -e is invisible without this.
 for u in funnel-app.service funnel-notices.service funnel-notices.timer \
          funnel-metrics.service funnel-metrics.timer; do
   sed -e "s|@RUN_USER@|$RUN_USER|g" \
       -e "s|@VENV_PYTHON@|${PY:-$VENV/bin/python}|g" \
+      -e "s|@REPO_DIR@|$REPO_DIR|g" \
       "$SRC_DIR/$u" > "$TMP/$u"
-  if [ -s "$TMP/$u" ]; then ok "rendered $u"; else fail "$u failed to render"; fi
+  if [ ! -s "$TMP/$u" ]; then fail "$u failed to render"; continue; fi
+  if leftover=$(grep -n '@[A-Z_][A-Z_]*@' "$TMP/$u"); then
+    fail "$u still contains an unsubstituted token:"
+    printf '%s\n' "$leftover" | sed 's/^/            /'
+  else
+    ok "rendered $u (no tokens left)"
+  fi
 done
+# WorkingDirectory must exist: a wrong path is status 200/CHDIR, and because EnvironmentFile uses
+# no `-` prefix any more, a wrong .env path is now a start failure rather than a silent boot on
+# defaults. Both are worth checking before `enable --now` rather than reading out of a journal.
+for d in "$REPO_DIR/funnel_app" "$(dirname "${PY:-$VENV/bin/python}")"; do
+  [ -d "$d" ] && ok "unit path exists: $d" || fail "unit references a missing directory: $d"
+done
+[ -f "$ENV_FILE" ] || fail "EnvironmentFile will not resolve: $ENV_FILE"
 if command -v systemd-analyze >/dev/null 2>&1; then
   # All five units, not just the app: `funnel-metrics.service` is the one with a `--day yesterday`
   # and a bash-free ExecStart, and a bad directive in a timer is invisible if only the app is fed

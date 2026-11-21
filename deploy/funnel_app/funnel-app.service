@@ -21,7 +21,7 @@
 
 [Unit]
 Description=Lane C Rank-4 funnel (funnel_app) on 127.0.0.1:8090
-Documentation=file:///opt/ghost-x2/deploy/funnel_app/README.md
+Documentation=@REPO_DIR@/deploy/funnel_app/README.md
 After=network-online.target
 Wants=network-online.target
 
@@ -29,8 +29,13 @@ Wants=network-online.target
 Type=exec
 User=@RUN_USER@
 Group=@RUN_USER@
-WorkingDirectory=/opt/ghost-x2/funnel_app
-EnvironmentFile=-/opt/ghost-x2/funnel_app/.env
+WorkingDirectory=@REPO_DIR@/funnel_app
+# No `-` prefix, deliberately: with `-` a missing or misspelled .env is ignored and the funnel
+# starts anyway on every default, which looks healthy and is not (charges off, outbox transport,
+# repo-relative state paths that a redeploy can wipe). This header's own reason for existing is
+# that a green `systemctl status` is not evidence the config loaded, so make a bad path fail here
+# instead. A typo in the path now reads as status 204/EXEC or a config-file error, not silence.
+EnvironmentFile=@REPO_DIR@/funnel_app/.env
 # Process env is read before the .env file is consulted, but the code treats the process
 # environment as the winner (config.load_dotenv uses os.environ.setdefault). Anything that must
 # beat the file — and FUNNEL_CHARGES_ENABLED should — belongs in an override:
