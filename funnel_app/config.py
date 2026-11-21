@@ -22,15 +22,54 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-ENV_PATHS = (ROOT.parent / ".env", ROOT / ".env")
+# The app's OWN .env first, then the repository root's — the reverse order of the original, and the
+# order matters more than it looks. `load_dotenv` below takes the FIRST file that exists and does not
+# merge, so on any checkout that has a root `.env` (this one does: the engine's, holding LLM and
+# Telegram keys, with zero FUNNEL_* lines) the old order found the engine's file, matched no funnel
+# variables in it, and stopped. Result measured on the deployed host: `FUNNEL_EMAIL_OUTBOX`,
+# `FUNNEL_DB_PATH` and `FUNNEL_BILLING_DB_PATH` were all unset, so the mailer wrote
+# `funnel_app/data/outbox/` and telemetry wrote `funnel_app/data/responses.sqlite3` — repo-relative
+# paths that a `git clean -fdx` takes with it, which is the exact thing StateDirectory= exists to
+# prevent. Invisible in production, because systemd's `EnvironmentFile=` supplies the real values,
+# and the app process env was correct throughout; it surfaced from a one-line mail probe run in a
+# shell. That is the class of bug: correct under systemd, wrong for every operator who follows the
+# README and runs a script by hand, and wrong in the direction of losing state rather than erroring.
+#
+# A root .env still applies for anything it defines (shared proxy/region settings, say) because
+# `load_dotenv` now loads both files, and `setdefault` keeps the funnel's own value as the winner.
+ENV_PATHS = (ROOT / ".env", ROOT.parent / ".env")
 
 
 def load_dotenv() -> None:
-    """Load the nearest .env without clobbering real environment variables.
+    """Load the funnel's .env, then the repo root's, without clobbering real environment variables.
 
-    Process env wins over the file, which is what a container expects: a compose
-    `environment:` block must be able to override whatever is parked in .env.
+    Process env wins over any file, which is what a container expects: a compose `environment:`
+    block must be able to override whatever is parked in .env. Within the files, earlier wins, so
+    `funnel_app/.env` beats the root's for any name they share — see ENV_PATHS for why the order is
+    load-bearing. The precedence survives being called twice, which plain `setdefault` does not
+    manage once two files are in play (see the `_PRISTINE_ENV` note below).
+
+    This loop deliberately does NOT `break` after the first file. It used to, when order alone looked
+    harmless; with a root .env present that first-found file was the engine's and contained no
+    FUNNEL_* keys, so the funnel booted on every default while reading a config file it assumed was
+    its own. Loading both is what makes "earlier wins" a real priority order rather than a lottery
+    on which file happens to exist.
     """
+    # Precedence, highest first: real process env, then funnel_app/.env, then the repo root .env.
+    # Two tiers of "don't overwrite" are needed and they are not the same check:
+    #   * a *file* must never beat real process env (a compose `environment:` block, or systemd's
+    #     EnvironmentFile=, which IS process env and is the production path);
+    #   * an *earlier file* must never be beaten by a later file (funnel's own file outranks root's).
+    # `setdefault` alone expresses both on the FIRST call: real process env already occupies the
+    # key so no file writes it, and the funnel file writes first so root's line is a no-op. It breaks
+    # on the SECOND call (a second `from_env()` in one interpreter — see the tests): names the first
+    # call wrote into os.environ from a file now *look* like process env, so a bare `setdefault`
+    # still skips them (correct by accident) but any *cleanup-and-reload* (tests, or code that
+    # delenvs then re-reads) makes the later root file win, because nothing distinguishes "came from
+    # process env" from "we wrote it ourselves last time". `_LOADED_KEYS` records what the files put
+    # there, so a re-read reproduces the same precedence instead of a lucky first-call ordering.
+    pristine = globals().setdefault("_PRISTINE_ENV", dict(os.environ))
+    loaded = globals().setdefault("_LOADED_KEYS", set())
     for path in ENV_PATHS:
         if not path.is_file():
             continue
@@ -45,8 +84,16 @@ def load_dotenv() -> None:
             value = value.strip()
             if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
                 value = value[1:-1]
-            os.environ.setdefault(key, value)
-        break  # first .env found wins; we do not merge two files
+            if key in pristine:
+                continue                 # real process env outranks every file, always
+            if key in loaded:
+                continue                 # an earlier file already set it; funnel beats root
+            os.environ[key] = value
+            loaded.add(key)
+        # No `break`: both files load so a root .env contributes anything only it defines (shared
+        # proxy/region settings), while the earlier funnel file keeps precedence on shared names.
+        # Reordering ENV_PATHS without removing this break was the half-fix that read well on a dev
+        # laptop and still lost state on the deploy host, where a root .env always exists.
 
 
 def _flag(name: str, default: str = "false") -> bool:
