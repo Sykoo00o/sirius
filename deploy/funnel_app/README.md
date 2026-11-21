@@ -42,10 +42,22 @@ that has no route to the host's loopback. Caddy stays off this path.
 | `cloudflared-ingress.yml` | merge into `/etc/cloudflared/config.yml` |
 | `install-funnel-app.sh` | run in place; no-arg mode changes nothing |
 
-The `.service` files contain `@RUN_USER@` and `@VENV_PYTHON@` placeholders. Use
-`install-funnel-app.sh`; if you install by hand, substitute them yourself
-(`sed -e "s|@RUN_USER@|sirius|g" -e "s|@VENV_PYTHON@|/opt/ghost-x2/funnel_app/.venv/bin/python|g"`),
-because a unit with a literal `@VENV_PYTHON@` in `ExecStart` fails at start with status 203/EXEC.
+The `.service` files are templates containing exactly two tokens, `@RUN_USER@` and `@VENV_PYTHON@`.
+Use `install-funnel-app.sh`, which substitutes and verifies them. If you install by hand, substitute
+both yourself (`sed -e "s|@RUN_USER@|sirius|g" -e "s|@VENV_PYTHON@|/opt/ghost-x2/funnel_app/.venv/bin/python|g"`)
+and confirm nothing is left:
+
+```bash
+grep -rn '@[A-Z_]*@' /etc/systemd/system/funnel-* || echo "clean: no unsubstituted tokens"
+```
+
+A literal `@VENV_PYTHON@` in `ExecStart` does **not** fail at `daemon-reload`, which accepts any
+ExecStart spelling; it fails at start as status **203/EXEC**, i.e. on the first restart after the
+one you checked. Those tokens sit on **six lines across three files** (`funnel-app.service`:
+`User=`, `Group=` and one `ExecStart=`; `funnel-metrics.service` and `funnel-notices.service`:
+`User=` and, in metrics only, one `ExecStart=`), and no `.timer` file carries either. Count with
+the grep above rather than a per-file mental model; the source files deliberately keep their
+comments free of token text so that grep cannot lie.
 
 ## Step 1 — preflight (changes nothing)
 
@@ -78,7 +90,6 @@ browser.
 
 ## Step 3 — env file
 
-```bash
 Set the two addresses and the hostname once, at the top:
 
 ```bash
@@ -86,35 +97,50 @@ FUNNEL_HOSTNAME=funnel.example.com
 SUPPORT_EMAIL=support@funnel.example.com
 ```
 
-`funnel-app.env.template` has exactly three `@…@` placeholders, all on active assignment lines and
-all commented-out lines excluded, so a whitespace-sensitive substitution cannot corrupt an email
-address hidden in prose:
+The template carries three marked values on three assignment lines; no comment contains one, so a
+substitution cannot corrupt an address hidden in prose. Verify on the resulting *values*, never by
+grepping for the placeholder names (the header names them, so that grep matches its own
+instruction). The copy below refuses to touch an existing `.env` rather than overwriting it:
 
 ```bash
-sudo -u sirius cp deploy/funnel_app/funnel-app.env.template funnel_app/.env
-sudo -u sirius python - "$FUNNEL_HOSTNAME" "$SUPPORT_EMAIL" <<'PY'
+# On this host the repo is /home/ubuntu/Sirius and the service user is ubuntu (matching
+# sirius-finance's own User=). Everywhere this README says sirius or /opt/ghost-x2, read those as
+# the generic spelling; on another box they may be right as written.
+RUN_USER=ubuntu REPO=/home/ubuntu/Sirius
+sudo -u "$RUN_USER" test -e "$REPO/funnel_app/.env" \
+  && echo "REFUSING: $REPO/funnel_app/.env already exists. Merge by hand; do not re-render." \
+  || sudo -u "$RUN_USER" cp deploy/funnel_app/funnel-app.env.template "$REPO/funnel_app/.env"
+
+# `-c '...' args`, not `- args <<PY`: with a heredoc, a non-option argument before the dash makes
+# python treat it as a *script path* and exit "can't find __main__ module", so the render silently
+# never runs. Heredoc and argv only coexist when the dash is the first operand.
+sudo -u "$RUN_USER" python -c '
 from pathlib import Path
 import secrets, sys
-host, mail = sys.argv[1], sys.argv[2]
-p = Path("/opt/ghost-x2/funnel_app/.env")
+repo, host, mail = sys.argv[1:4]
+p = Path(repo) / "funnel_app/.env"
 t = p.read_text().replace("@FUNNEL_HOSTNAME@", host) \
                  .replace("@SUPPORT_EMAIL@", mail) \
                  .replace("@SESSION_SECRET_HEX@", secrets.token_hex(32))
-# Look for the literal token, not for any "@": "support@funnel.example.com" is a legitimate
-# value and would trip a bare-at check, aborting a correct deploy.
-leftover = [l for l in t.splitlines()
-            if "@FUNNEL_HOSTNAME@" in l or "@SUPPORT_EMAIL@" in l or "@SESSION_SECRET_HEX@" in l]
-assert not leftover, f"placeholder not substituted: {leftover}"
+# Assert on the VALUES, not on the placeholder names: the template header mentions those names in
+# prose, so a name-based assertion fires on its own documentation. Any surviving at-sign followed
+# by a capitalised name on these three lines is an un-substituted value.
+suspect = [l for l in t.splitlines()
+           if l.startswith(("FUNNEL_PUBLIC_URL=", "FUNNEL_SUPPORT_EMAIL=", "FUNNEL_SESSION_SECRET="))]
+assert len(suspect) == 3, suspect
+bad = [l for l in suspect if "@" in l.split("=", 1)[1] or not l.split("=", 1)[1].strip()]
+assert not bad, f"value not substituted: {bad}"
+secret = [l for l in suspect if l.startswith("FUNNEL_SESSION_SECRET=")][0].split("=", 1)[1]
+assert len(secret) == 64 and all(c in "0123456789abcdef" for c in secret), "session secret is not 64 hex chars"
 p.write_text(t)
 print("wrote", p)
-PY
-sudo chmod 600 funnel_app/.env && sudo chown sirius:sirius funnel_app/.env
-grep -nE '^(FUNNEL_PUBLIC_URL|FUNNEL_SUPPORT_EMAIL|FUNNEL_CHARGES_ENABLED|FUNNEL_.*DB_PATH|FUNNEL_EMAIL_OUTBOX|FUNNEL_METRICS_CSV)=' funnel_app/.env
+' "$REPO" "$FUNNEL_HOSTNAME" "$SUPPORT_EMAIL"
+sudo chmod 600 "$REPO/funnel_app/.env" && sudo chown "$RUN_USER:$RUN_USER" "$REPO/funnel_app/.env"
+grep -nE '^(FUNNEL_PUBLIC_URL|FUNNEL_SUPPORT_EMAIL|FUNNEL_CHARGES_ENABLED|FUNNEL_.*DB_PATH|FUNNEL_EMAIL_OUTBOX|FUNNEL_METRICS_CSV|FUNNEL_SESSION_SECRET)=' "$REPO/funnel_app/.env" | sed 's/\(SESSION_SECRET=\)\S\{8\}\S*/\1<64-hex>/'
 ```
 
 The last line is the five-second review: four absolute paths under `/var/lib/funnel-app`, one
 hostname, and `FUNNEL_CHARGES_ENABLED=false`.
-```
 
 Leave `FUNNEL_CHARGES_ENABLED=false`. The three Stripe keys stay commented out until you drop them
 in; with them absent the app serves the entire journey in rehearsal and `/health` names each
@@ -291,9 +317,14 @@ If you would rather have cron than a timer, the equivalent line — note that it
 python and the absolute DB paths, and that cron cannot tell exit 1 from exit 2 for you:
 
 ```cron
-5 9 * * * sirius cd /opt/ghost-x2/funnel_app && .venv/bin/python ../scripts/export_lane_c_metrics.py --day "$(date -u -d yesterday +\%F)" --fail-on-ceiling
+5 9 * * * sirius cd /opt/ghost-x2/funnel_app && .venv/bin/python ../scripts/export_lane_c_metrics.py --day yesterday --fail-on-ceiling
 15 9 * * * sirius curl -sf -X POST http://127.0.0.1:8090/ops/send-notices
 ```
+
+Cron *does* run a shell, unlike `ExecStart=`, so `$(date -u -d yesterday +%F)` would work here — but
+`--day yesterday` is the same on a BSD box, and the two lines above still name `sirius` and
+`/opt/ghost-x2`, so change both to your actual user and repo path (on this host: `ubuntu`,
+`/home/ubuntu/Sirius`) or the job runs as the wrong user and fails on the state directory's 0750.
 
 ## Rollback
 

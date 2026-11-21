@@ -43,5 +43,9 @@ NoNewPrivileges=true
 PrivateTmp=true
 # The metrics CSV is written under the state directory (FUNNEL_METRICS_CSV), which ProtectSystem
 # would otherwise make unwritable. Read-only for the tree, writable for the one place state lives.
+#
+# Written by the timer, NOT by the app unit: `funnel-app.service` does not declare this, so it
+# relies on StateDirectory= making /var/lib/funnel-app writable (it is, mode 0750), and only this
+# unit needs the explicit allowance. Change the state path and you must change it in both units.
 ProtectSystem=strict
 ReadWritePaths=/var/lib/funnel-app

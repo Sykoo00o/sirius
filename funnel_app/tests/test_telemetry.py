@@ -1756,6 +1756,31 @@ def test_main_refuses_an_unrecognised_day_word(sheet, capsys):
     assert "YYYY-MM-DD" in err, "the error must state the accepted forms, not just reject"
 
 
+@pytest.mark.parametrize("doc", ["deploy/funnel_app/README.md", "funnel_app/README.md",
+                                 "funnel_app/PHASE3_MANUAL_TEST.md"])
+def test_runbook_fenced_blocks_are_balanced(doc: str):
+    """A runbook with an unbalanced fence renders the wrong thing as code, which is worse than a
+    typo because it looks authoritative: this file once had a Step 3 where the prose "Set the two
+    addresses…" was rendered as a shell command and the real `FUNNEL_HOSTNAME=…` assignments fell
+    out into the paragraph. A human skimming would copy the wrong lines.
+
+    Counted per file, and a fence line carrying a language tag (` ```bash `) that *opens* inside an
+    already-open block is the exact mistake this catches, so parity alone is the check.
+    """
+    lines = (REPO_ROOT / doc).read_text(encoding="utf-8").splitlines()
+    fences = [i + 1 for i, l in enumerate(lines) if l.strip().startswith("```")]
+    assert len(fences) % 2 == 0, (
+        f"{doc} has {len(fences)} fence lines (odd), so at least one block is unterminated; "
+        f"fences at lines {fences}")
+    # Every opener must look like a fence, and no *closing* fence may carry a language tag:
+    # ` ```bash ` in a closing position means a block was opened twice.
+    for index, line_number in enumerate(fences):
+        text = lines[line_number - 1].strip()
+        if index % 2 == 1 and text != "```":
+            raise AssertionError(f"{doc}:{line_number} closes a block but carries a language tag "
+                                 f"({text!r}); a block was opened twice")
+
+
 def test_deploy_units_use_the_shell_free_day_form():
     """The units are the only consumer of the word form, so if one regresses to `$(date … +%F)`
     the bug is invisible until a week of wrong rows has been exported. Cheaper to assert the file

@@ -11,8 +11,13 @@
 #   * Its own venv and its own StateDirectory. It shares no process, no port and no database
 #     with the engine, so restarting this unit cannot blink the finance API.
 #
-# Install as /etc/systemd/system/funnel-app.service after editing User= and the two @PLACEHOLDER@
-# paths. See deploy/funnel_app/README.md for the copy/chmod/daemon-reload sequence.
+# Install via deploy/funnel_app/install-funnel-app.sh, which substitutes the tokens and verifies
+# the result. Installing by hand means replacing every token in User=, Group= and ExecStart. A
+# leftover literal does not fail at `daemon-reload`, which accepts any ExecStart spelling; it fails
+# at start as status 203/EXEC, on the first restart after the one you checked. This comment names
+# no token on purpose: a `grep -rn` for the token shape over the installed units is the check that
+# catches a missed one, and a comment mentioning it by name would make that grep always find
+# something and therefore always lie.
 
 [Unit]
 Description=Lane C Rank-4 funnel (funnel_app) on 127.0.0.1:8090
