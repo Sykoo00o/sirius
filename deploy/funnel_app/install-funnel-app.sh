@@ -238,6 +238,13 @@ if command -v systemd-analyze >/dev/null 2>&1; then
   if [ -n "$OURS" ]; then
     # "Command X is not executable" is the expected state before Step 2 creates the venv, so it is
     # a warn there and a fail at --apply time, where the venv must already exist.
+    #
+    # Second reason not to trust the exit status, learned the hard way: the OLD form
+    # `verify ... | grep -v '^$' && warn || ok` graded grep's status, so verify's real findings
+    # vanished behind a "verify clean". The check was believed, and it was wrong.
+    # `systemd-analyze verify` also exits 0 for findings it *ignores* (an invalid Documentation= URI
+    # is one), so a clean exit is not evidence of a clean unit either way. This is why the decision
+    # is taken on the captured text, and why `install`-time output below is shown, not swallowed.
     if [ "$APPLY" = 1 ]; then
       fail "systemd-analyze verify reported problems in our units:"
       printf '%s\n' "$OURS" | sed 's/^/            /'
@@ -269,12 +276,46 @@ install -m 0644 "$TMP/funnel-notices.service"  "$UNITS_DIR/"
 install -m 0644 "$TMP/funnel-notices.timer"    "$UNITS_DIR/"
 install -m 0644 "$TMP/funnel-metrics.service"  "$UNITS_DIR/"
 install -m 0644 "$TMP/funnel-metrics.timer"    "$UNITS_DIR/"
+# Install first, then verify, then decide whether to bring the service up. Previously the FAIL
+# raised above fell through to `enable --now` and exited 0 anyway, so a unit with known findings
+# went live and the run read as a success; a check that cannot stop the thing it is checking is a
+# report, not a gate.
+install -m 0644 "$TMP/funnel-app.service"      "$UNITS_DIR/"
+install -m 0644 "$TMP/funnel-notices.service"  "$UNITS_DIR/"
+install -m 0644 "$TMP/funnel-notices.timer"    "$UNITS_DIR/"
+install -m 0644 "$TMP/funnel-metrics.service"  "$UNITS_DIR/"
+install -m 0644 "$TMP/funnel-metrics.timer"    "$UNITS_DIR/"
 systemctl daemon-reload
-systemd-analyze verify "$UNITS_DIR/funnel-app.service" || warn "installed unit fails verify"
+# Verify the INSTALLED files, not the temp copies. An install that mangles a path is exactly the
+# failure this catches, and it cannot be seen from the source side. Output is echoed, not eaten:
+# on the first real apply this line printed an "Invalid URL, ignoring" finding to a terminal that
+# had already been told the units were fine by a grep two lines earlier.
+INSTALLED=$(systemd-analyze verify "$UNITS_DIR"/funnel-app.service "$UNITS_DIR"/funnel-notices.service \
+           "$UNITS_DIR"/funnel-notices.timer "$UNITS_DIR"/funnel-metrics.service \
+           "$UNITS_DIR"/funnel-metrics.timer 2>&1 || true)
+if ! printf '%s\n' "$INSTALLED" | grep -qE "funnel-(app|notices|metrics)"; then
+  ok "installed units verify clean (no findings for any funnel unit)"
+else
+  say "  systemd-analyze findings on the installed units:"
+  printf '%s\n' "$INSTALLED" | grep -E "funnel-(app|notices|metrics)" | sed 's/^/            /'
+fi
+if [ "$BAD" -gt 0 ]; then
+  # Units are on disk and daemon-reloaded, deliberately not started: the host keeps whatever ran
+  # before, and a corrected re-run of this script picks up from here.
+  fail "$BAD finding(s) unresolved, so nothing was started. Fix them and re-run --apply."
+  say ""
+  say "units installed (not started): $UNITS_DIR/funnel-*.{service,timer}"
+  exit 1
+fi
 systemctl enable --now funnel-app.service
 systemctl enable --now funnel-notices.timer funnel-metrics.timer
 ok "funnel-app.service enabled and started"
 ok "timers enabled: funnel-notices.timer funnel-metrics.timer"
+# The counter a green "active" hides: a unit that failure-looped before booting right keeps its
+# NRestarts, so "50" is the residue of a config error and not a property of the running process.
+# Read once at startup so it lands beside the "started" line instead of being missed.
+say "  info      NRestarts at startup: $(systemctl show -p NRestarts --value funnel-app.service) \
+(reset with: systemctl reset-failed funnel-app)"
 say ""
 say "next: systemctl status funnel-app --no-pager && curl -s http://127.0.0.1:8090/health | head -40"
 say "then: point the Cloudflare Tunnel hostname at 127.0.0.1:8090 and register the Stripe webhook"

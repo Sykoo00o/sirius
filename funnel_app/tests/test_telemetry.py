@@ -34,6 +34,7 @@ import hmac
 import importlib
 import importlib.util
 import json
+import re
 import sqlite3
 import sys
 import time
@@ -1795,3 +1796,55 @@ def test_deploy_units_use_the_shell_free_day_form():
     assert "%" not in exec_lines[0], \
         "a bare % in a systemd ExecStart is a specifier, not a date format"
     assert "--fail-on-ceiling" in exec_lines[0], "a kill metric must still fail the unit"
+
+
+def test_installed_funnel_units_are_clean_after_substitution(tmp_path):
+    """Parse the unit the way systemd will, *after* the installer's substitution, and assert on the
+    result. Two failure modes this replaces, both real:
+
+      * `Documentation=@REPO_DIR@/deploy/...` rendered to a path that existed and was still not a
+        URI, so systemd dropped it with "Invalid URL, ignoring" while `systemctl status` read
+        active. An earlier revision of this test asserted the scheme on the *template* and passed,
+        then failed on the token sitting in that template: a source-template check cannot tell a
+        token from a scheme, and a token is supposed to be there.
+      * `sed` is silent about a pattern it never matched, so a dropped `-e` renders a unit whose
+        directives hold literal `@TOKEN@` text. It starts, then fails at the *next* restart.
+
+    The substitute call mirrors install-funnel-app.sh's sed list verbatim; if a token is added to
+    the units and not to that list, the leftover-token assert below is what says so."""
+    src = REPO_ROOT / "deploy" / "funnel_app"
+    subs = (("@RUN_USER@", "sirius"),
+            ("@VENV_PYTHON@", "/srv/funnel_app/.venv/bin/python"),
+            ("@REPO_DIR@", "/srv/ghost-x2"))
+    installed = {}
+    for name in ("funnel-app.service", "funnel-notices.service", "funnel-metrics.service"):
+        text = (src / name).read_text(encoding="utf-8")
+        for token, value in subs:
+            text = text.replace(token, value)
+        installed[name] = text
+
+    for name, text in installed.items():
+        assert not re.search(r"@[A-Z][A-Z0-9_]*@", text), \
+            f"{name} still carries a token after substitution"
+        active = [l for l in text.splitlines() if l.strip() and not l.lstrip().startswith("#")]
+        directives = [l for l in active if re.match(r"^[A-Za-z]+\s*=", l)]
+        assert directives, f"{name} parsed to no directives"
+
+    app = installed["funnel-app.service"]
+    docs = [l.split("=", 1)[1].strip() for l in app.splitlines() if l.startswith("Documentation=")]
+    assert docs, "the app unit lost its Documentation= line"
+    for uri in docs:
+        # A bare path is what shipped, and a bare path is what systemd silently ignores.
+        assert uri.split("://", 1)[0] in ("file", "https", "http", "man"), \
+            f"{uri!r} is not a URI, so systemd drops it and nothing else complains"
+    wd = [l.split("=", 1)[1].strip() for l in app.splitlines() if l.startswith("WorkingDirectory=")]
+    assert wd == ["/srv/ghost-x2/funnel_app"], wd
+    env_file = [l.split("=", 1)[1].strip() for l in app.splitlines()
+                if l.startswith("EnvironmentFile=")]
+    assert env_file and not env_file[0].startswith("-"), \
+        "a '-' prefix on EnvironmentFile means a missing .env boots the funnel on defaults"
+    assert env_file == ["/srv/ghost-x2/funnel_app/.env"], env_file
+    assert [l for l in app.splitlines() if l.startswith("ExecStart=")][0].startswith(
+        "ExecStart=/srv/funnel_app/.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8090"
+    ), "the installed ExecStart is not the one this deploy was verified with"
+    tmp_path  # reserved; the asserts above read the templates directly

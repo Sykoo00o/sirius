@@ -1,5 +1,9 @@
 # Lane C Rank-4 funnel — production unit.
 #
+# Documentation= takes a URI, not a path. It needs the file:// scheme: rendered to a bare
+# "/opt/ghost-x2/..." it is dropped at load with "Invalid URL, ignoring", which
+# `systemd-analyze verify` prints and `systemctl status` never mentions.
+#
 # Isolation is the point of this file, so the three facts that keep it apart from the other
 # services are at the top rather than buried below:
 #
@@ -21,7 +25,7 @@
 
 [Unit]
 Description=Lane C Rank-4 funnel (funnel_app) on 127.0.0.1:8090
-Documentation=@REPO_DIR@/deploy/funnel_app/README.md
+Documentation=file://@REPO_DIR@/deploy/funnel_app/README.md
 After=network-online.target
 Wants=network-online.target
 

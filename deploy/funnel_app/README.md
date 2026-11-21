@@ -66,6 +66,13 @@ Each failure mode has its own status code, which is why the grep matters more th
 **none of them fail at `daemon-reload`**, which accepts almost any spelling. They fail at start,
 meaning on the first restart after the one you checked.
 
+`Documentation=` is a **URI** field, so it needs the `file://` scheme: rendered to a bare path the
+unit still starts and `systemctl status` stays green, while `systemd-analyze verify` prints
+"Invalid URL, ignoring" — the one real finding this deploy produced on the VPS, invisible in the
+place an operator looks. Directive typos split into the ones that stop the start (203/EXEC,
+200/CHDIR) and the ones that are quietly dropped; `Documentation=` is in the second group, and
+verify is the only thing that tells you.
+
 Count with the grep rather than a per-file mental model: **11 token-bearing lines across three
 files** (six in `funnel-app.service`, four in `funnel-metrics.service`, one in
 `funnel-notices.service`; note `funnel-metrics.service`'s `ExecStart` carries two tokens on one
