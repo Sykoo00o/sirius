@@ -137,7 +137,7 @@ Same walk, one substitution at step 4, and the point is the *leading indicator*,
 
 ```bash
 cd funnel_app
-python3 ../scripts/export_lane_c_metrics.py --day "$(date -u -d yesterday +%F)" --fail-on-ceiling; echo "exit $?"
+python3 ../scripts/export_lane_c_metrics.py --day yesterday --fail-on-ceiling; echo "exit $?"
 ```
 
 Exit `2` means a kill metric tripped and the summary names it. Exit `1` means nothing was exported

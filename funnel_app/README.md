@@ -55,8 +55,13 @@ curl -X POST http://127.0.0.1:8090/ops/send-notices
 # supplies neither points at the default database and exports a cheerful empty day, so name the
 # path in the unit if the app's database is not at the default.
 cd /opt/ghost-x2/funnel_app && python3 ../scripts/export_lane_c_metrics.py \
-    --day "$(date -u -d yesterday +%F)" --fail-on-ceiling
+    --day yesterday --fail-on-ceiling
 ```
+
+`--day` also takes `today`, `N days ago` (spaces optional) or an explicit `YYYY-MM-DD`. The word
+forms exist so that the same line works on a GNU host and a BSD one, and so a systemd unit needs
+neither a shell nor a `%` — systemd reads `%F` as its own specifier, not as `date`'s format. A
+`--day` value that is neither a date nor a known word is an error, not a silent fallback to today.
 
 Mail goes to `data/outbox` as `.eml` files unless `FUNNEL_SMTP_URL` is set, which is what makes
 the trial receipt and the cancellation confirmation reviewable by eye before anything is sent

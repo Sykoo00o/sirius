@@ -1,0 +1,47 @@
+# Yesterday's Day-1 metrics row, written to the Phase 0 sheet.
+#
+# `--day $(date -u -d yesterday)` rather than today: exporting a day that is still running is how
+# a ratio sheet gets a row that looked final and was not. Yesterday is closed.
+#
+# `--fail-on-ceiling` makes a kill metric a *failed unit*, so a breach is a red `systemctl list-units`
+# and a journal line rather than a number nobody opened. That is the reason it runs as a unit and
+# not a crontab line: cron has no notion of "this exited 2 on purpose and someone should look".
+#
+# Exit codes the unit will show (from the script's own contract):
+#   0  the day exported
+#   1  nothing exported (funnel never ran, or the database predates telemetry)
+#   2  a kill metric tripped; the summary names it
+# 1 is not necessarily an alarm: on a quiet day it is the honest reading, and it is the reason
+# this unit should be watched with `systemctl list-timers` rather than paged on. The summary the
+# script prints names which case it is (no rows for the day, versus no telemetry table at all),
+# and that is the line worth reading before deciding whether exit 1 meant anything.
+
+[Unit]
+Description=Lane C funnel: export yesterday's Day-1 metrics row
+After=network-online.target funnel-app.service
+Wants=funnel-app.service
+
+[Service]
+Type=oneshot
+User=@RUN_USER@
+WorkingDirectory=/opt/ghost-x2/funnel_app
+EnvironmentFile=-/opt/ghost-x2/funnel_app/.env
+# The script finds `funnel_app/.env` from its own location, so the EnvironmentFile above is belt
+# and braces; what it cannot do is guess a database path that is not the default. Absolute paths
+# in .env are what make this line correct on the VPS.
+# `--day yesterday` is resolved by the script itself, and that is deliberate: it keeps this line
+# free of any shell *and* free of any percent sign. The obvious form,
+# `bash -c '... --day $(date -u -d yesterday +%F)'`, has two failure modes, and both are silent:
+# systemd expands `%F` as its own specifier (a unit's filesystem root) before the shell sees it,
+# and GNU `date -d yesterday` does not exist on BSD. A unit that resolves to the wrong day exports
+# a confident, wrong row every morning and never complains. One token, no quoting, no specifier.
+ExecStart=@VENV_PYTHON@ /opt/ghost-x2/scripts/export_lane_c_metrics.py --day yesterday --fail-on-ceiling
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=funnel-metrics
+NoNewPrivileges=true
+PrivateTmp=true
+# The metrics CSV is written under the state directory (FUNNEL_METRICS_CSV), which ProtectSystem
+# would otherwise make unwritable. Read-only for the tree, writable for the one place state lives.
+ProtectSystem=strict
+ReadWritePaths=/var/lib/funnel-app

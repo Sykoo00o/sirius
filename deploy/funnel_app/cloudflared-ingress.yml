@@ -1,0 +1,33 @@
+# Cloudflare Tunnel ingress for the funnel.
+#
+# This file is the *shape* of the change, not a whole config to drop in. The live config is
+# /etc/cloudflared/config.yml on the VPS and it already routes the engine, so merge the new
+# hostname into its `ingress:` list rather than replacing the file.
+#
+# Why the funnel gets a hostname instead of a path prefix on the engine's hostname:
+#   * `/webhooks/stripe` has to be unique per origin. Stripe posts to one URL per endpoint, and a
+#     path-prefix route that rewrote `/funnel/webhooks/stripe` -> `/webhooks/stripe` would mean
+#     the engine's own `/webhooks/stripe` and the funnel's are distinguished only by a rewrite
+#     rule nobody reads at 3am.
+#   * The funnel sets absolute URLs from FUNNEL_PUBLIC_URL (canonical links, confirmation copy).
+#     Those read correctly only when the origin really is its own hostname.
+#   * Stripe's origin checks and Radar signals key off the hostname. A funnel on a path of a
+#     B2B hostname inherits that hostname's reputation, which is the opposite of why the funnel
+#     has its own merchant account.
+#
+# Rules are matched top to bottom, first match wins, and the catch-all must stay last.
+
+ingress:
+
+  # --- existing: the Sirius engine API on 127.0.0.1:8000 ---------------------
+  # Leave whatever the live file already has for the engine here, untouched.
+
+  # --- NEW: the Lane C funnel -------------------------------------------------
+  - hostname: funnel.example.com          # <-- replace, and set FUNNEL_PUBLIC_URL to match
+    service: http://127.0.0.1:8090
+    # Keep the connect timeout short. A funnel that is not answering should fail fast and let
+    # Cloudflare serve its own error page rather than hold a customer's card screen open.
+    keepAliveTimeouts: 90s
+
+  # Catch-all, must remain the final rule.
+  - service: http_status:404

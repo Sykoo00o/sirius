@@ -57,12 +57,13 @@ import csv
 import io
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
 import tempfile
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -228,6 +229,41 @@ LOW_VOLUME_BELOW = 250
 
 def utc_today() -> str:
     return datetime.now(timezone.utc).date().isoformat()
+
+
+RELATIVE_DAY_RE = re.compile(r"^(\d+)\s*days?\s*ago$")
+
+
+def utc_relative_day(spec: str) -> str | None:
+    """Resolve `today` / `yesterday` / `N days ago` / `Ndaysago` to a UTC `YYYY-MM-DD`.
+
+    Returns None when `spec` is not a recognised word, so the caller can tell "a date" from "a
+    typo" and refuse the typo. Returning the input on a miss was the first version, and it turned
+    `--since 3daysago` (which matched nothing back then) into a silent export of *today*: the
+    failure was a wrong row, not an error, which is the kind of bug a metrics script should never
+    ship because the sheet looks perfectly plausible either way.
+
+    Exists so a systemd timer can say `--day yesterday` in one ExecStart token and need no shell.
+    That is not a style preference: the alternative spells `$(date -u -d yesterday +%F)` inside a
+    unit, and systemd expands `%F` as its own specifier (a unit-file's filesystem root) before the
+    shell sees it. Getting that wrong is silent and simply exports the wrong day forever. GNU
+    `date -d yesterday` is also BSD-incompatible, so the same line cannot be tested on a mac and
+    trusted on the VPS.
+
+    Spacing is optional in the N-day form (`3 days ago`, `3daysago`, `3Days Ago`) because the
+    compact form is the one that fits in a unit file, and the one someone will type from memory.
+    """
+    if not spec:
+        return None
+    lowered = spec.strip().lower()
+    today = datetime.now(timezone.utc).date()
+    offsets = {"today": 0, "yesterday": 1, "-1d": 1}
+    if lowered in offsets:
+        return (today - timedelta(days=offsets[lowered])).isoformat()
+    match = RELATIVE_DAY_RE.match(lowered)
+    if match:
+        return (today - timedelta(days=int(match.group(1)))).isoformat()
+    return None
 
 
 def utc_now_iso() -> str:
@@ -1216,7 +1252,10 @@ def main(argv: list[str] | None = None) -> int:
         description="Export Lane C's Day-1 metrics row(s) from the funnel's own event rows.")
     window = parser.add_mutually_exclusive_group()
     window.add_argument("--day", default=None,
-                        help="one UTC day, YYYY-MM-DD (default: today)")
+                        help="one UTC day, YYYY-MM-DD, or the words 'today'/'yesterday'/"
+                             "'2daysago' (default: today). The word forms exist so a systemd "
+                             "unit needs no shell: `%%F` inside a unit is systemd's own "
+                             "specifier, not date's format.")
     window.add_argument("--since", metavar="YYYY-MM-DD",
                         help="every UTC day from here through --until")
     parser.add_argument("--until", metavar="YYYY-MM-DD", default=None,
@@ -1244,14 +1283,34 @@ def main(argv: list[str] | None = None) -> int:
         if not csv_path.is_absolute():
             csv_path = funnel_root / csv_path
 
-    days = ([args.day] if args.day
-            else daterange(args.since, args.until or utc_today()) if args.since
-            else [utc_today()])
-    for day in days:
+    # Resolved here, before validation and before `daterange`, so `--since yesterday` and
+    # `--until yesterday` mean the same thing they do on --day rather than dying in the format
+    # check below with a message about a word the help text explicitly offers.
+    def resolve(name: str, value: str | None) -> str | None:
+        """A date passes through; a recognised word becomes a date; anything else stops the run.
+
+        The third case is the whole point. `--since yesterdy` must not be read as a date-shaped
+        thing or quietly default to today, because both produce a sheet and neither is what the
+        operator asked for.
+        """
+        if not value:
+            return None
+        resolved = utc_relative_day(value)
+        if resolved is not None:
+            return resolved
         try:
-            datetime.strptime(day, "%Y-%m-%d")
+            datetime.strptime(value, "%Y-%m-%d")
         except ValueError:
-            parser.error(f"day {day!r} is not YYYY-MM-DD")
+            parser.error(f"{name} {value!r} is neither YYYY-MM-DD nor one of "
+                         f"today / yesterday / 'N days ago'")
+        return value
+
+    day_arg = resolve("--day", args.day)
+    since_arg = resolve("--since", args.since)
+    until_arg = resolve("--until", args.until)
+    days = ([day_arg] if day_arg
+            else daterange(since_arg, until_arg or utc_today()) if since_arg
+            else [utc_today()])
 
     breaches: list[str] = []
     for day in days:

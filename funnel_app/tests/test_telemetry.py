@@ -1407,8 +1407,16 @@ def test_opt_ins_need_the_quiz_store_and_survive_its_absence(sheet, monkeypatch)
     store = storage_module.ResponseStore(
         Path(importlib.import_module("config").FunnelSettings.from_env().database_abspath))
     answers = {f"q{n}": ["x"] for n in range(len(quiz_module.QUESTIONS))}
+    # `append_event` stamps `occurred_at` with *now* — there is no occurred_at parameter — and
+    # the export filters responses by `substr(occurred_at,1,10) = day`. Writing the row whenever
+    # the test happens to run made this assertion depend on the wall clock: correct on the day
+    # Phase 3 shipped, failing by the next UTC midnight. Backdate it to the exported day so the
+    # fixture describes the day it claims to describe, not the day pytest ran.
     store.append_event(visitor_key="q1", status="started", answers=answers,
                        step=len(quiz_module.QUESTIONS))
+    with sqlite3.connect(store.path) as conn:
+        conn.execute("update funnel_responses set occurred_at = ? where visitor_key = ?",
+                     ("2026-11-20T10:00:00+00:00", "q1"))
     seed_day(sheet, "2026-11-20", visitors=5, paid=2)
     row, _detail = export(sheet)
     assert row["opt_ins"] == "1", row
@@ -1696,3 +1704,69 @@ def test_env_example_documents_the_phase_three_variables():
     combined = documented + (root.read_text(encoding="utf-8") if root.is_file() else "")
     assert "FUNNEL_METRICS_CSV" in combined
     assert "STRIPE_READ_KEY_FUNNEL" in combined
+
+
+@pytest.mark.parametrize("spec,offset", [
+    ("today", 0), ("yesterday", 1), ("-1d", 1),
+    ("2 days ago", 2), ("2daysago", 2), ("7DAYS AGO", 7), ("0daysago", 0),
+])
+def test_relative_day_words_resolve_to_utc_dates(sheet, spec: str, offset: int):
+    """The deploy unit says `--day yesterday` instead of `--day $(date -u -d yesterday +%F)`, so
+    the resolution moved into the script and has to be tested here rather than trusted on a VPS.
+
+    Two reasons the shell form lost: systemd expands `%F` as its own specifier (a unit's filesystem
+    root) before a shell would ever see it, and GNU `date -d yesterday` does not exist on BSD, so
+    the old line could not be rehearsed on the machine it was written on. Both failure modes
+    export a *confident wrong day* rather than erroring, which on a metrics sheet is invisible.
+
+    Asserted as an offset from UTC today, never as a literal date, so the test does not itself
+    expire at midnight.
+    """
+    export = sheet["export"]
+    expected = (datetime.now(timezone.utc).date() - timedelta(days=offset)).isoformat()
+    assert export.utc_relative_day(spec) == expected, spec
+
+
+@pytest.mark.parametrize("spec", ["", None])
+def test_a_blank_day_spec_resolves_nothing_rather_than_today(sheet, spec):
+    """Returning `today` for an empty string would make `--since ''` mean "from today", i.e. a
+    one-day range, when the caller means "unset, use the default". The caller distinguishes the
+    two, so the helper must not collapse them."""
+    assert sheet["export"].utc_relative_day(spec) is None
+
+
+@pytest.mark.parametrize("spec", ["2026-11-20", "2026-11-20 ", "yesterdy", "yestderday",
+                                  "2 weeks ago", "tomorrow", "agreement", "3days", "abc"])
+def test_an_unrecognised_day_word_is_none_not_a_guess(sheet, spec):
+    """Returning the input on a miss was the first version, and it turned `--since 3daysago`
+    (unmatched at the time) into a silent export of *today*: a plausible sheet, wrong contents.
+    `None` is the answer that lets `main()` refuse the value out loud instead."""
+    assert sheet["export"].utc_relative_day(spec) is None
+
+
+def test_main_refuses_an_unrecognised_day_word(sheet, capsys):
+    """The helper returning None only helps if the CLI acts on it. A typo in a cron line must
+    produce a non-zero exit and name the offending value, not write a row nobody asked for."""
+    export = sheet["export"]
+    with pytest.raises(SystemExit) as raised:
+        export.main(["--day", "yesterdy", "--offline"])
+    assert raised.value.code != 0
+    err = capsys.readouterr().err
+    assert "yesterdy" in err, err
+    assert "YYYY-MM-DD" in err, "the error must state the accepted forms, not just reject"
+
+
+def test_deploy_units_use_the_shell_free_day_form():
+    """The units are the only consumer of the word form, so if one regresses to `$(date … +%F)`
+    the bug is invisible until a week of wrong rows has been exported. Cheaper to assert the file
+    than to notice the sheet, and this is the same style as the dry-run assertions above: the
+    safety property is a fact about a file, so it is checked against the file."""
+    units = REPO_ROOT / "deploy" / "funnel_app"
+    metrics = (units / "funnel-metrics.service").read_text(encoding="utf-8")
+    exec_lines = [l for l in metrics.splitlines()
+                  if l.startswith("ExecStart") and "export_lane_c_metrics" in l]
+    assert len(exec_lines) == 1, exec_lines
+    assert "--day yesterday" in exec_lines[0], exec_lines[0]
+    assert "%" not in exec_lines[0], \
+        "a bare % in a systemd ExecStart is a specifier, not a date format"
+    assert "--fail-on-ceiling" in exec_lines[0], "a kill metric must still fail the unit"

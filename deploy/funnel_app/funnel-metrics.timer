@@ -1,0 +1,15 @@
+# 09:05 UTC daily, which is before the 09:15 notice sweep so the two never interleave in the log
+# and a kill-metric breach is the first thing in the journal that morning.
+#
+# Persistent=true: a VPS rebooted at 09:00 should still get yesterday's row.
+
+[Unit]
+Description=Daily Lane C funnel Day-1 metrics export
+
+[Timer]
+OnCalendar=*-*-* 09:05:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

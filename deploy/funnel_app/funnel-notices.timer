@@ -1,0 +1,18 @@
+# 09:15 UTC daily. After 09:00 so the metrics timer owns the first journal slot and the two runs
+# never interleave in the log. Notice timing is day-granular (§2.1: day minus two), so the minute
+# is about operator convenience, not about legal notice windows.
+#
+# Persistent=true fires a missed run at next boot, which is what you want after a VPS reboot:
+# a skipped morning of notices is a missed retention email, and the sweep is idempotent, so a
+# late run is harmless and a forgotten run is not.
+
+[Unit]
+Description=Daily Lane C funnel notice sweep
+
+[Timer]
+OnCalendar=*-*-* 09:15:00 UTC
+Persistent=true
+RandomizedDelaySec=180
+
+[Install]
+WantedBy=timers.target

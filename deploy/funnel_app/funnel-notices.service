@@ -1,0 +1,28 @@
+# Daily renewal-notice sweep for the funnel (day −2 notices, spec §2.1).
+#
+# Why a timer and not an in-app scheduler: the sweep is idempotent (each send is recorded before
+# it is attempted, so a customer cannot be told about the same charge twice), so the only cost of
+# calling it often is a log line. A route + timer keeps "did the notices go out today" answerable
+# with `systemctl status funnel-notices` instead of the app's own memory.
+#
+# Calls the loopback route, not a script, so there is exactly one implementation of the sweep and
+# the curl a human runs on a renewal morning is the same call.
+
+[Unit]
+Description=Lane C funnel: send due renewal notices
+After=network-online.target funnel-app.service
+Wants=funnel-app.service
+
+[Service]
+Type=oneshot
+User=@RUN_USER@
+# -f: a 4xx/5xx must be a *failed* unit, because that is the only thing the journal shows an
+# operator who is not watching. The app answers 502 when it causes the failure, which is the case
+# worth waking for.
+ExecStart=/usr/bin/curl --silent --show-error --fail --max-time 120 -X POST http://127.0.0.1:8090/ops/send-notices
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=funnel-notices
+NoNewPrivileges=true
+ProtectSystem=strict
+PrivateTmp=true

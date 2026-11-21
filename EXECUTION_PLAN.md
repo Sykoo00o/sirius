@@ -13,6 +13,12 @@ Two stacks live side by side in one `engine` schema. The plan does not assume a 
 | Gate | `route_spend()` in `backend/finance_agent.py`, tiers 30/250 USD | `request_approval()` RPC via `backend/engine/finance_gatekeeper.py`, tiers 50/250 USD |
 | HITL | `POST /webhooks/telegram` (deployed) + `backend/supervisor.py` PTB loop | REST approvals in `engine/main.py` + `engine/telegram_bot.py` |
 | Runtime | systemd `sirius-finance`, VPS port 8000, Cloudflare Tunnel | `docker-compose.yml` on port 3100 behind Caddy |
+
+A third runtime now sits beside those two, deliberately not merged into either: systemd
+`funnel-app`, VPS `127.0.0.1:8090`, its own Cloudflare Tunnel hostname, its own venv, and two
+SQLite files under `/var/lib/funnel-app`. Deploy artifacts and the runbook are in
+`deploy/funnel_app/`. It shares no process, port, or database with the rows above, so a restart
+of one cannot blink the others.
 | Workers | `backend/workers/{funnel,digital_arbitrage,agency}_worker.py` | `backend/engine/workers/{funnel,arbitrage,whitelabel}_worker.py` |
 | LLM | `backend/llm_router.py`, OpenRouter + NIM, fast/reasoning tiers, live | `backend/engine/llm.py` |
 

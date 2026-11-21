@@ -1,0 +1,77 @@
+# Lane C Rank-4 funnel — production unit.
+#
+# Isolation is the point of this file, so the three facts that keep it apart from the other
+# services are at the top rather than buried below:
+#
+#   * Port 8090 only. `sirius-finance` holds 8000 and the compose/Caddy stack holds 3100;
+#     nothing here binds either.
+#   * Bind 127.0.0.1. The funnel is reachable from the internet only through the Cloudflare
+#     Tunnel. A public 0.0.0.0 bind would put an unauthenticated quiz + checkout surface on the
+#     VPS IP with nothing in front of it.
+#   * Its own venv and its own StateDirectory. It shares no process, no port and no database
+#     with the engine, so restarting this unit cannot blink the finance API.
+#
+# Install as /etc/systemd/system/funnel-app.service after editing User= and the two @PLACEHOLDER@
+# paths. See deploy/funnel_app/README.md for the copy/chmod/daemon-reload sequence.
+
+[Unit]
+Description=Lane C Rank-4 funnel (funnel_app) on 127.0.0.1:8090
+Documentation=file:///opt/ghost-x2/deploy/funnel_app/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=@RUN_USER@
+Group=@RUN_USER@
+WorkingDirectory=/opt/ghost-x2/funnel_app
+EnvironmentFile=-/opt/ghost-x2/funnel_app/.env
+# Process env is read before the .env file is consulted, but the code treats the process
+# environment as the winner (config.load_dotenv uses os.environ.setdefault). Anything that must
+# beat the file — and FUNNEL_CHARGES_ENABLED should — belongs in an override:
+#   systemctl edit funnel-app
+#   [Service]
+#   Environment=FUNNEL_CHARGES_ENABLED=true
+ExecStart=@VENV_PYTHON@ -m uvicorn main:app --host 127.0.0.1 --port 8090 --no-server-header
+Restart=always
+RestartSec=3
+
+# Persistent state. `StateDirectory=funnel-app` makes and owns /var/lib/funnel-app as the
+# service user before ExecStart, so the first write to billing.sqlite3 cannot fail on
+# permissions, and a `git pull` on the checkout can never touch billing state, WALS, or the
+# outbox. Point both databases and the outbox there in .env:
+#   FUNNEL_DB_PATH=/var/lib/funnel-app/responses.sqlite3
+#   FUNNEL_BILLING_DB_PATH=/var/lib/funnel-app/billing.sqlite3
+#   FUNNEL_EMAIL_OUTBOX=/var/lib/funnel-app/outbox
+StateDirectory=funnel-app
+StateDirectoryMode=0750
+# Safe here because the unit writes nothing under the checkout (no .pyc: PYTHONDONTWRITEBYTECODE,
+# no .pytest_cache: this is not a test run). A read-only tree is the cheaper guarantee than
+# remembering which paths the app is allowed to dirty.
+ProtectSystem=strict
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ProtectKernelTunables=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# Journal is the log: funnel.* lines carry the webhook rejections and the unsigned-webhook
+# warning, and they belong somewhere that survives a redeploy.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=funnel-app
+
+# Uvicorn graceful-close headroom. Stripe checkout redirects must not be cut mid-handshake by a
+# stop-signal that is too eager.
+TimeoutStopSec=30
+KillSignal=SIGINT
+KillMode=mixed
+
+# The one tradeoff to know about: `main:app` binds the settings read at *import* time
+# (main.py: settings = FunnelSettings.from_env()), and there is no reload endpoint. A changed
+# .env needs a restart, and nothing short of one picks it up:
+#   systemctl restart funnel-app
+
+[Install]
+WantedBy=multi-user.target
