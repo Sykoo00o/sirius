@@ -35,11 +35,22 @@ case "${1:-}" in
   *) echo "usage: $0 [--apply]" >&2; exit 64 ;;
 esac
 
+# Two counters, because one number made plan mode contradict its own prose.
+#
+# BAD counts blockers: they stop --apply from starting anything. ADV counts advisories — the three
+# unset Stripe keys, a loose .env mode, SUPERVISOR_ENABLED appearing where nothing reads it — all of
+# which are the posture this deploy is *asked* to hold during rehearsal. With one counter, plan mode
+# exited 1 on a correctly configured rehearsal box while its own text said to expect those WARNs, so
+# a non-zero exit stopped meaning "something is wrong" and an operator had to read the output every
+# time to learn what "failed" was worth. At --apply the advisories still show; they just do not
+# block, because refusing to boot a rehearsal funnel over a deliberately absent Stripe key would
+# only teach whoever deployed it to pass --apply blindly.
 say()  { printf '%s\n' "$*"; }
 ok()   { printf '  ok      %s\n' "$*"; }
-warn() { printf '  WARN    %s\n' "$*"; BAD=$((BAD + 1)); }
+warn() { printf '  WARN    %s\n' "$*"; ADV=$((ADV + 1)); }
 fail() { printf '  FAIL    %s\n' "$*"; BAD=$((BAD + 1)); }
 BAD=0
+ADV=0
 
 # Note on a check deliberately NOT here: an `openssl rsa -check` "is this file readable" probe
 # cannot be trusted on arbitrary text. Given a non-key file, some builds print
@@ -159,10 +170,58 @@ for want in FUNNEL_DB_PATH FUNNEL_BILLING_DB_PATH FUNNEL_EMAIL_OUTBOX FUNNEL_MET
 done
 
 # --- 5. port isolation -----------------------------------------------------
+# Who holds 8090 decides whether this is a collision or a redeploy, so name the holder with the
+# unit rather than a pid. The first version of this check called *every* listener a collision,
+# which meant the second `--apply` — the routine one, a week later with a changed .env — could not
+# run: funnel-app.service was holding its own port. Worse, the run reported FAIL, refused to start
+# anything, and left the OLD process serving on the NEW unit files, so the fix installed and never
+# took effect while `systemctl is-active` stayed cheerfully green.
+WHO_8090=""
+if [ -n "$PORT_TOOL" ] && port_busy 8090; then
+  # Which unit owns the listening pid — asked of the *listener*, not of funnel-app's MainPID,
+  # because if a stray uvicorn ever held 8090 while the unit was also up, trusting MainPID would
+  # call someone else's socket a redeploy. Four spellings tried on this host, in the order they
+  # turned out to be useless, then useful:
+  #   * `ps -o unit=` prints a cgroup path, not a unit name, so it cannot be compared to one;
+  #   * `systemctl status <pid>`'s first line is decorated (bullet), and the sed meant for it
+  #     silently printed nothing — which reads as "not ours" about a process that demonstrably was.
+  #     BSD sed compounds this: it demands text after `q}`, so the same one-liner behaves
+  #     differently on the deploy box and on the laptop it was written on;
+  #   * `systemctl show <pid> --property=FragmentPath` returned empty on this machine (non-root,
+  #     no polkit agent — GetUnitByPID is not one of the free queries);
+  #   * /proc/<pid>/cgroup works with no privileges, no decoration and nothing to interpret.
+  # `systemctl status <pid>`'s "Loaded: loaded (<path>" line is kept as the fallback, since a host
+  # with no procfs gets a named "unknown" rather than a wrong verdict.
+  RS_PID=$(systemctl show -p MainPID --value funnel-app.service 2>/dev/null || echo "")
+  LISTENER_PID=$(ss -ltnp 2>/dev/null | sed -n 's/.*:8090 .*pid=\([0-9]*\).*/\1/p' | head -1)
+  LISTENER_UNIT=""
+  if [ -n "$LISTENER_PID" ]; then
+    SLICE=$(sed -n 's|^0::/||p' "/proc/$LISTENER_PID/cgroup" 2>/dev/null | tail -1)
+    case "$SLICE" in *.service) LISTENER_UNIT="${SLICE##*/}" ;; esac
+    if [ -z "$LISTENER_UNIT" ]; then
+      FRAG=$(systemctl status "$LISTENER_PID" --no-pager 2>/dev/null \
+             | grep -o 'Loaded: loaded (/[^;(]*' | head -1 | sed 's|.*/||')
+      LISTENER_UNIT="${FRAG%. }"
+    fi
+  fi
+  if [ "$LISTENER_UNIT" = "funnel-app.service" ]; then
+    WHO_8090="funnel-app.service"
+  else
+    WHO_8090="pid=${LISTENER_PID:-?} unit=${LISTENER_UNIT:-unknown}${RS_PID:+, funnel-app MainPID=$RS_PID}"
+  fi
+fi
+# One PORT_TOOL guard for the whole section. An earlier edit left the 8000/3100 checks stranded
+# outside it, which on a host with neither ss nor lsof (macOS, where `ss` does not exist) would run
+# port_busy with PORT_TOOL empty and report neighbours as down for the wrong reason. The WARN about
+# the missing tool is printed at the top of the script, so nothing is silenced here.
 if [ -n "$PORT_TOOL" ]; then
-  if port_busy 8090; then
-    fail "something already listens on 8090 — find it before installing
-            ss -ltnp | grep ':8090'"
+  if [ -n "$WHO_8090" ]; then
+    if [ "$WHO_8090" = "funnel-app.service" ]; then
+      ok "8090 is held by funnel-app.service (pid $(systemctl show -p MainPID --value funnel-app.service)): a redeploy, so this run must restart it"
+    else
+      fail "something already listens on 8090 ($WHO_8090) and it is not funnel-app.service — find it before installing
+              ss -ltnp | grep ':8090'"
+    fi
   else
     ok "port 8090 free"
   fi
@@ -263,7 +322,11 @@ if [ "$APPLY" != 1 ]; then
   say ""
   say "plan only — nothing installed. Re-run with --apply, as root:"
   say "  sudo -E REPO_DIR=$REPO_DIR RUN_USER=$RUN_USER $0 --apply"
-  [ "$BAD" -gt 0 ] && say "(and resolve the $BAD finding(s) above first)"
+  # Exit 0 when only advisories fired: a rehearsal box is supposed to look like this. Any FAIL is a 1.
+  if [ "$ADV" -gt 0 ] && [ "$BAD" = 0 ]; then
+    say "($ADV advisor$([ "$ADV" = 1 ] || echo y)/ies noted — expected during rehearsal, and they do not block the deploy)"
+  fi
+  [ "$BAD" -gt 0 ] && say "(and resolve the $BAD blocker(s) above first)"
   exit $(( BAD > 0 ? 1 : 0 ))
 fi
 
@@ -302,15 +365,36 @@ fi
 if [ "$BAD" -gt 0 ]; then
   # Units are on disk and daemon-reloaded, deliberately not started: the host keeps whatever ran
   # before, and a corrected re-run of this script picks up from here.
-  fail "$BAD finding(s) unresolved, so nothing was started. Fix them and re-run --apply."
+  fail "$BAD blocker(s) unresolved, so nothing was started. Fix them and re-run --apply."
   say ""
   say "units installed (not started): $UNITS_DIR/funnel-*.{service,timer}"
   exit 1
 fi
-systemctl enable --now funnel-app.service
-systemctl enable --now funnel-notices.timer funnel-metrics.timer
-ok "funnel-app.service enabled and started"
-ok "timers enabled: funnel-notices.timer funnel-metrics.timer"
+systemctl enable funnel-app.service funnel-notices.timer funnel-metrics.timer >/dev/null
+ok "enabled: funnel-app.service funnel-notices.timer funnel-metrics.timer"
+if [ "$WHO_8090" = "funnel-app.service" ]; then
+  # A redeploy, so the *restart* is the step that matters. `enable --now` on an already-active unit
+  # is a no-op: it does not reload ExecStart or the EnvironmentFile, and settings are read at import
+  # time. That silently leaves the previous process serving traffic under the unit files you just
+  # replaced, which is how a fix can install cleanly and still not be running.
+  #
+  # No `reset-failed` here. The counter survives a successful restart, and a number that clears
+  # itself the moment you look at it is worth half as much as one that keeps the story: this host
+  # still shows the 50 restarts the untokenised WorkingDirectory cost it, which is the evidence the
+  # unit file is now correct.
+  old_pid=$(systemctl show -p MainPID --value funnel-app.service)
+  systemctl restart funnel-app.service
+  new_pid=$(sleep 2; systemctl show -p MainPID --value funnel-app.service)
+  if [ -n "$new_pid" ] && [ "$new_pid" != "0" ] && [ "$new_pid" != "$old_pid" ]; then
+    ok "restarted funnel-app.service into the new unit (pid $old_pid -> $new_pid)"
+  else
+    fail "restarted funnel-app.service but the main pid did not change (still ${new_pid:-none}); the old process may still hold 8090
+            systemctl status funnel-app --no-pager && journalctl -u funnel-app -n 30 --no-pager"
+  fi
+else
+  systemctl start funnel-app.service
+  ok "started funnel-app.service (8090 was free)"
+fi
 # The counter a green "active" hides: a unit that failure-looped before booting right keeps its
 # NRestarts, so "50" is the residue of a config error and not a property of the running process.
 # Read once at startup so it lands beside the "started" line instead of being missed.

@@ -147,7 +147,7 @@ sudo -u "$RUN_USER" cp deploy/funnel_app/funnel-app.env.template "$REPO/funnel_a
 #     path arrives mangled. A quoted heredoc passes all of it as stdin, no shell in the middle.
 sudo -u "$RUN_USER" "$REPO/funnel_app/.venv/bin/python" - "$REPO" "$FUNNEL_HOSTNAME" "$SUPPORT_EMAIL" <<'PY'
 from pathlib import Path
-import secrets, sys
+import re, secrets, sys
 repo, host, mail = sys.argv[1:4]
 p = Path(repo) / "funnel_app/.env"
 t = p.read_text().replace("@FUNNEL_HOSTNAME@", host) \
@@ -159,14 +159,20 @@ t = p.read_text().replace("@FUNNEL_HOSTNAME@", host) \
 suspect = [l for l in t.splitlines()
            if l.startswith(("FUNNEL_PUBLIC_URL=", "FUNNEL_SUPPORT_EMAIL=", "FUNNEL_SESSION_SECRET="))]
 assert len(suspect) == 3, suspect
-# A leftover reads as @UPPER_SNAKE@, so that is the shape tested for, not a bare at-sign.
-# A real support address contains one, and an earlier revision of this very check rejected
-# "support@vegastudios.site" and aborted the render, leaving the template's own placeholders in the
-# file. Same bug as the bare-at version the template header warns about, reintroduced.
-import re
-LEFTOVER = re.compile(r"@[A-Z][A-Z0-9_]*@")
+# Name the three placeholders; do not pattern-match the at-sign. TWO revisions of this check got
+# it wrong in opposite directions, both aborting a correct render and leaving the template's own
+# placeholders in the file:
+#   * a bare "@" — an address contains one, so it rejects the real value it is standing over;
+#   * "@UPPER_SNAKE@" — matches SUPPORT_EMAIL=support@vegastudios.site, because "@vegas…@site"
+#     spans the two at-signs *inside one legitimate address*. Observed on this host: a live,
+#     correctly rendered .env read as "unsubstituted wreckage".
+# Only names can be right here, because for these three fields a substituted value and a leftover
+# placeholder are the same shape. Read the names off the template, so it stays true when one is added.
+tmpl_names = {m.group(1) for m in re.finditer(r"@([A-Z][A-Z0-9_]*)@",
+              (Path(repo) / "deploy/funnel_app/funnel-app.env.template").read_text())}
 bad = [l for l in suspect
-       if LEFTOVER.search(l.split("=", 1)[1]) or not l.split("=", 1)[1].strip()]
+       if any(f"@{n}@" in l.split("=", 1)[1] for n in tmpl_names)
+       or not l.split("=", 1)[1].strip()]
 assert not bad, f"value not substituted: {bad}"
 secret = [l for l in suspect if l.startswith("FUNNEL_SESSION_SECRET=")][0].split("=", 1)[1]
 assert len(secret) == 64 and all(c in "0123456789abcdef" for c in secret), "session secret is not 64 hex chars"
