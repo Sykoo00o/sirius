@@ -107,14 +107,23 @@ instruction). The copy below refuses to touch an existing `.env` rather than ove
 # sirius-finance's own User=). Everywhere this README says sirius or /opt/ghost-x2, read those as
 # the generic spelling; on another box they may be right as written.
 RUN_USER=ubuntu REPO=/home/ubuntu/Sirius
-sudo -u "$RUN_USER" test -e "$REPO/funnel_app/.env" \
-  && echo "REFUSING: $REPO/funnel_app/.env already exists. Merge by hand; do not re-render." \
-  || sudo -u "$RUN_USER" cp deploy/funnel_app/funnel-app.env.template "$REPO/funnel_app/.env"
+sudo -u "$RUN_USER" # The guard must *exit*, not just print. The obvious `test -e f && echo refuse || cp` prints
+# REFUSING and then keeps going: the `||` is the cp, so the branch you wanted to skip is the branch
+# the failure runs, and the script ends 0 as if it had rendered. Paste-and-continue then overwrites
+# the live .env, which is the one thing this step promised not to do.
+if test -e "$REPO/funnel_app/.env"; then
+  echo "REFUSING: $REPO/funnel_app/.env already exists. Merge by hand; do not re-render."; exit 3
+fi
+sudo -u "$RUN_USER" cp deploy/funnel_app/funnel-app.env.template "$REPO/funnel_app/.env"
 
-# `-c '...' args`, not `- args <<PY`: with a heredoc, a non-option argument before the dash makes
-# python treat it as a *script path* and exit "can't find __main__ module", so the render silently
-# never runs. Heredoc and argv only coexist when the dash is the first operand.
-sudo -u "$RUN_USER" python -c '
+# A QUOTED heredoc (`<<'PY'`) with the dash as the first operand, and args after the delimiter
+# line. Two failure modes this avoids, both of which mangled this render silently on the real VPS:
+#   * `python - args <<PY` puts a non-option argument before the dash, so python treats the arg as
+#     a *script path* and dies with "can't find __main__ module".
+#   * `-c '...'` breaks on any apostrophe-delimited quote inside the program: the payload's own
+#     `'${...}'` literals close the shell's quote, the tail spills into the outer shell, and the
+#     path arrives mangled. A quoted heredoc passes all of it as stdin, no shell in the middle.
+sudo -u "$RUN_USER" "$REPO/funnel_app/.venv/bin/python" - "$REPO" "$FUNNEL_HOSTNAME" "$SUPPORT_EMAIL" <<'PY'
 from pathlib import Path
 import secrets, sys
 repo, host, mail = sys.argv[1:4]
@@ -123,18 +132,25 @@ t = p.read_text().replace("@FUNNEL_HOSTNAME@", host) \
                  .replace("@SUPPORT_EMAIL@", mail) \
                  .replace("@SESSION_SECRET_HEX@", secrets.token_hex(32))
 # Assert on the VALUES, not on the placeholder names: the template header mentions those names in
-# prose, so a name-based assertion fires on its own documentation. Any surviving at-sign followed
-# by a capitalised name on these three lines is an un-substituted value.
+# prose, so a name-based assertion fires on its own documentation. Test the @UPPER_SNAKE@ shape
+# rather than any "@", because a support email legitimately contains one.
 suspect = [l for l in t.splitlines()
            if l.startswith(("FUNNEL_PUBLIC_URL=", "FUNNEL_SUPPORT_EMAIL=", "FUNNEL_SESSION_SECRET="))]
 assert len(suspect) == 3, suspect
-bad = [l for l in suspect if "@" in l.split("=", 1)[1] or not l.split("=", 1)[1].strip()]
+# A leftover reads as @UPPER_SNAKE@, so that is the shape tested for, not a bare at-sign.
+# A real support address contains one, and an earlier revision of this very check rejected
+# "support@vegastudios.site" and aborted the render, leaving the template's own placeholders in the
+# file. Same bug as the bare-at version the template header warns about, reintroduced.
+import re
+LEFTOVER = re.compile(r"@[A-Z][A-Z0-9_]*@")
+bad = [l for l in suspect
+       if LEFTOVER.search(l.split("=", 1)[1]) or not l.split("=", 1)[1].strip()]
 assert not bad, f"value not substituted: {bad}"
 secret = [l for l in suspect if l.startswith("FUNNEL_SESSION_SECRET=")][0].split("=", 1)[1]
 assert len(secret) == 64 and all(c in "0123456789abcdef" for c in secret), "session secret is not 64 hex chars"
 p.write_text(t)
 print("wrote", p)
-' "$REPO" "$FUNNEL_HOSTNAME" "$SUPPORT_EMAIL"
+PY
 sudo chmod 600 "$REPO/funnel_app/.env" && sudo chown "$RUN_USER:$RUN_USER" "$REPO/funnel_app/.env"
 grep -nE '^(FUNNEL_PUBLIC_URL|FUNNEL_SUPPORT_EMAIL|FUNNEL_CHARGES_ENABLED|FUNNEL_.*DB_PATH|FUNNEL_EMAIL_OUTBOX|FUNNEL_METRICS_CSV|FUNNEL_SESSION_SECRET)=' "$REPO/funnel_app/.env" | sed 's/\(SESSION_SECRET=\)\S\{8\}\S*/\1<64-hex>/'
 ```
