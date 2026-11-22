@@ -367,3 +367,14 @@ def test_reduced_motion_policy_keeps_content_visible() -> None:
     assert "transition: none !important" not in base, (
         "base.html carries a blanket transition kill again; move the policy into app.css "
         "where the .reveal escape hatch can see it")
+
+
+def test_stylesheet_links_carry_a_content_version(client):
+    """A deploy's CSS must not wait out a CDN cache: the link changes when the file does."""
+    import hashlib
+    import re
+    css = Path(__file__).resolve().parents[1] / "static" / "app.css"
+    version = hashlib.sha256(css.read_bytes()).hexdigest()[:10]
+    for page in ("/", "/health"):
+        links = re.findall(r'href="(/static/[\w.-]+\.css[^"]*)"', client.get(page).text)
+        assert links and all(f"?v={version}" in link for link in links), (page, links)
