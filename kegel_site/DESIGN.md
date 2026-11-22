@@ -1,7 +1,7 @@
-# DESIGN.md — Floorwise (kegel plans for men and women)
+# DESIGN.md — kegeldoc (kegel plans for sexual health, men and women)
 
 Reference build. The *pattern* comes from simple.life (measurements in
-`../funnel_app/capture/plan.md`); the brand, palette, imagery and every sentence are Floorwise's
+`../funnel_app/capture/plan.md`); the brand, palette, imagery and every sentence are kegeldoc's
 own. Content context (question topics, flow order) was studied from quiz.kegel-plan.com; none of
 its copy, statistics or reviews are reused.
 
