@@ -191,8 +191,8 @@ class Copy:
     @property
     def cta_fine_print(self) -> str:
         return (
-            f"About a 4-minute quiz. {self.trial_amount} for the first {self.trial_days} "
-            f"days, then {self.rebill_per_month} until you cancel. Week 1 is free to read first."
+            f"About a 4-minute quiz. Plans from {self.trial_amount} for the first "
+            f"{self.trial_days} days, then {self.rebill_per_month} until you cancel."
         )
 
     @property
@@ -201,12 +201,13 @@ class Copy:
             ("1", "Answer a short quiz",
              "Your goal, what you notice now, whether you have tried kegels before, a quick "
              "squeeze test, and how much time you really have. No account."),
-            ("2", "Read your week 1 free",
-             "Seven days of sessions with exact holds, rests and reps, before you are asked "
-             "for anything."),
-            ("3", "Weeks 2 to 4, if week 1 was worth something",
-             f"{self.trial_amount} for {self.trial_days} days of the full plan and the guided "
-             f"timer. Then {self.rebill_per_month} a month, and one click ends it."),
+            ("2", "See your plan",
+             "Seven days of sessions with exact holds, rests and reps, built from your "
+             "answers, before you choose a plan."),
+            ("3", "Pick 1, 4 or 12 weeks",
+             f"From {self.trial_amount} for the first {self.trial_days} days of the full plan "
+             f"and the guided timer. Then {self.rebill_per_month} a month, and one click ends "
+             "it."),
         )
 
     # ---- checkout ----------------------------------------------------------

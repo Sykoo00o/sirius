@@ -22,7 +22,7 @@
     <dl class="mt-5 space-y-2.5 text-sm bg-white rounded-2xl border border-line p-5">
       {% for row in [
         ('Amount charged today', copy.trial_amount),
-        ('Trial length', copy.trial_days ~ ' days'),
+        ('Plan length', copy.trial_days ~ ' days'),
         ('Renewal amount', copy.rebill_per_month ~ ', until you cancel'),
         ('First renewal', 'About ' ~ copy.renewal_date),
         ('Cancel', 'One click from your account page, no fee'),
@@ -43,7 +43,7 @@
     </p>
 
     <div class="mt-6 flex flex-wrap gap-3">
-      <a href="/preview" class="rounded-2xl bg-ink text-paper px-5 py-3 font-semibold transition hover:bg-ink/90">Back to my week 1</a>
+      <a href="/preview" class="rounded-2xl bg-ink text-paper px-5 py-3 font-semibold transition hover:bg-ink/90">Back to my plan</a>
       <a href="/" class="rounded-2xl border border-line bg-white px-5 py-3 font-semibold transition hover:border-ember/50">Start over</a>
     </div>
   </div>

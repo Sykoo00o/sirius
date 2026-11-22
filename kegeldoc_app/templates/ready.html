@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Your plan is ready &middot; {{ brand }}{% endblock %}
+{% block body_class %}kd quiz-body{% endblock %}
+{% block extra_styles %}{% endblock %}
+{% block main_class %}{% endblock %}
+{% block header %}{% include "_flow_header.html" %}{% endblock %}
+
+{% block main %}
+<div class="quiz-main screen-in">
+  <section class="result-head">
+    <div class="glow a" style="left:-140px;top:-120px;width:320px;height:320px" aria-hidden="true"></div>
+    <span class="eyebrow" style="position:relative">Your personal kegel plan is ready</span>
+    <h1>A {{ plan.minutes }}-minute daily plan for <span class="grad-text">{{ plan.focus | lower }}</span></h1>
+    <p class="muted" style="margin-top:12px;position:relative">Built from your {{ total }} answers and saved to {{ email }}.</p>
+    <dl class="kv">
+      <div><dt>Starting level</dt><dd>{{ plan.level_name }}</dd></div>
+      <div><dt>Starting hold</dt><dd>{{ plan.hold_seconds }} seconds</dd></div>
+      <div><dt>Daily drill</dt><dd>{{ plan.drill_name }}</dd></div>
+      <div><dt>Plan length</dt><dd>1, 4 or 12 weeks</dd></div>
+    </dl>
+  </section>
+  <div class="quiz-cta"><a class="btn-cta" href="/preview">Get my plan <span aria-hidden="true">&rarr;</span></a></div>
+</div>
+{% endblock %}

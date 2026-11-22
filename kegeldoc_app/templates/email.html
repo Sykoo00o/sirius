@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Get your plan &middot; {{ brand }}{% endblock %}
+{% block body_class %}kd quiz-body{% endblock %}
+{% block extra_styles %}{% endblock %}
+{% block main_class %}{% endblock %}
+{% block header %}{% include "_flow_header.html" %}{% endblock %}
+
+{% block main %}
+<div class="quiz-main screen-in">
+  <form method="post" action="/email" class="email-step" novalidate>
+    <span class="eyebrow">Last step</span>
+    <h1 class="fact-title">Enter your email to get your personal kegel plan</h1>
+    {% if error %}<div role="alert" class="quiz-error"><p>{{ error }}</p></div>{% endif %}
+    <label class="sr-only" for="email">Email address</label>
+    <input class="email-input" id="email" name="email" type="email" inputmode="email" autocomplete="email" required maxlength="254" value="{{ email or '' }}" placeholder="you@example.com" autofocus>
+    <p class="note-small" style="text-align:left">We use your email to save your plan and send your receipt. We never sell it. See the <a href="/policy/privacy">privacy policy</a>.</p>
+    <div class="quiz-cta"><button class="btn-cta" type="submit">Continue <span aria-hidden="true">&rarr;</span></button></div>
+  </form>
+</div>
+{% endblock %}

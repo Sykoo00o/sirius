@@ -439,6 +439,7 @@ class FakeStripe(stripe_billing.StripeClient):
             "customer": "cus_fake1",
             "subscription": subscription_id,
             "customer_details": {"email": data.get("customer_email") or "payer@example.com"},
+            "metadata": dict(data.get("metadata") or {}),
         }
         return self.sessions[session_id]
 
@@ -876,6 +877,42 @@ def test_checkout_creates_a_session_pricing_the_trial_today(live):
     assert recurring[0]["price_data"]["unit_amount"] == 3900
     assert recurring[0]["price_data"]["recurring"]["interval"] == "month"
     assert request["subscription_data"]["trial_end"] > time.time()
+
+
+def test_a_twelve_week_plan_is_priced_and_recorded_as_twelve_weeks(live):
+    """The plan picked on the paywall is what Stripe charges, what the row records and what the
+    dashboard shows, and the processor's metadata names it so a webhook can tell plans apart."""
+    import plans
+    settings = live.main.settings
+    twelve = plans.find(settings, "12w")
+    live.fake().reset()
+    live.get("/")
+    walk(live)
+    started = post(live, "/checkout/start", [("email", "payer@example.com"), ("plan", "12w")])
+    assert started.status_code == 303, started.text[:600]
+    request = live.fake().session_request
+    amounts = [line["price_data"]["unit_amount"] for line in request["line_items"]]
+    assert twelve.amount_minor in amounts and settings.trial_amount_minor not in amounts, amounts
+    assert request["metadata"]["plan_option"] == "12w"
+    days = (request["subscription_data"]["trial_end"] - time.time()) / 86400
+    assert 83 < days <= 84, days
+    session_id = started.headers["location"].rsplit("/", 1)[-1]
+    # No `plan` on the return URL: the processor's metadata is what decides.
+    assert live.get(f"/checkout/complete?session_id={session_id}").status_code == 200
+    row = live.main.billing_store.get_subscription(visitor_of(live))
+    assert row["trial_amount_minor"] == twelve.amount_minor
+    dashboard = live.get("/dashboard").text
+    from funnel_copy import money
+    assert money(twelve.amount_minor, settings.currency) in dashboard
+
+
+def test_an_unknown_plan_never_reaches_the_processor(live):
+    live.fake().reset()
+    live.get("/")
+    walk(live)
+    started = post(live, "/checkout/start", [("email", "payer@example.com"), ("plan", "free")])
+    assert started.status_code == 303 and started.headers["location"] == "/preview"
+    assert live.fake().session_request == {}
 
 
 def test_checkout_session_carries_the_visitor_and_absolute_urls(live):

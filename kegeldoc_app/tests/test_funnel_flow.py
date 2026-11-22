@@ -235,7 +235,7 @@ def test_full_walk_reaches_a_populated_preview(client):
     summary = client.get("/summary")
     assert summary.status_code == 200
     # Answers shown back as the labels the visitor tapped, plus the typed note.
-    for needle in ("Keeping it is hard", "None of these", "Long commute", "Show my week 1"):
+    for needle in ("Keeping it is hard", "None of these", "Long commute", "Back to my plan"):
         assert needle.lower() in summary.text.lower(), needle
 
     preview = client.get("/preview")

@@ -1,15 +1,14 @@
 {% extends "base.html" %}
-{% block title %}Your week 1 &middot; {{ brand }}{% endblock %}
+{% block title %}Choose your plan &middot; {{ brand }}{% endblock %}
 {% block body_class %}kd quiz-body{% endblock %}
 {% block extra_styles %}{% endblock %}
+{% block header %}{% include "_flow_header.html" %}{% endblock %}
 
 {#
-  The pre-paywall artefact. The routine funnel's three rules, unchanged:
-
-  1. Week 1 renders completely: every hold, rest and rep, nothing blurred or truncated, no
-     sign-up gate, because the artefact is the thing that must survive being inspected.
-  2. Weeks 2-4 are genuinely absent, not hidden: the lock says what changes (WEEK_ARCS).
-  3. The recurring price and all four disclosures sit on this page too.
+  The paywall: three paid plans (1, 4 and 12 weeks), 4 weeks preselected, and no free tier.
+  Each plan card carries its own price, renewal and refund lines, so whichever plan is picked,
+  its terms were on screen before the button. Week 1 still renders in full below the picker as
+  the proof the plan came from these answers; weeks 2 onwards stay absent, not hidden.
 
   Kegel additions: the safety note renders above week 1 whenever an answer warrants a clinician
   first, and the lifestyle notes are observations, never promises. The ask block carries prices
@@ -21,7 +20,7 @@
   <section data-section="preview-header" class="result-head">
     <div class="glow a" style="left:-140px;top:-120px;width:320px;height:320px" aria-hidden="true"></div>
     <div class="glow b" style="right:-140px;top:40px;width:300px;height:300px" aria-hidden="true"></div>
-    <span class="eyebrow" style="position:relative">Week 1 of 4 &middot; free to read</span>
+    <span class="eyebrow" style="position:relative">Your personal kegel plan &middot; {{ score.level }} compatibility</span>
     {% set accent = plan.focus | lower %}
     <h1>A {{ plan.minutes }}-minute daily kegel plan for <span class="grad-text">{{ accent }}</span></h1>
     <p class="muted" style="margin-top:12px;position:relative">{{ plan.coach_note }}</p>
@@ -37,8 +36,29 @@
     <div class="safety" data-section="preview-safety"><b>Before you start</b>{{ plan.safety_note }}</div>
   {% endif %}
 
+  {% set cancel_line = copy.disclosure('cancel_line') %}
+  <section data-section="preview-ask" id="plans" class="plan-pick" aria-labelledby="pick-h">
+    <h2 id="pick-h" class="sec-title">Choose your plan</h2>
+    <form method="get" action="/checkout">
+      <div class="plan-opts" role="radiogroup" aria-labelledby="pick-h">
+      {% for card in cards %}
+        <label class="plan-opt{% if card.option.popular %} popular{% endif %}">
+          <input type="radio" name="plan" value="{{ card.option.key }}"{% if card.selected %} checked{% endif %}>
+          {% if card.option.popular %}<span class="po-tag">Most popular</span>{% endif %}
+          <span class="po-dot" aria-hidden="true"></span>
+          <span class="po-main"><b>{{ card.option.name }}</b><small>{{ card.price }} for {{ card.option.weeks }} week{{ 's' if card.option.weeks > 1 }}</small></span>
+          <span class="po-day"><b>{{ card.per_day }}</b><small>per day</small></span>
+          <span class="po-terms">{{ card.terms.disclosure('price_line') }}. {{ card.terms.disclosure('renewal_line') }} {{ card.terms.disclosure('refund_line') }}</span>
+        </label>
+      {% endfor %}
+      </div>
+      <button class="btn-cta" type="submit">Get my plan <span aria-hidden="true">&rarr;</span></button>
+      <p class="po-cancel">{{ cancel_line }}</p>
+    </form>
+  </section>
+
   <section data-section="preview-days" aria-labelledby="week1">
-    <h2 id="week1" class="sec-title">Week 1, free to read</h2>
+    <h2 id="week1" class="sec-title">Your week 1</h2>
     <p class="muted" style="margin-top:4px;font-size:14px">{{ plan.week_arc.arc }} Tap a day to see every rep.</p>
     {% for day in plan.days %}
       <details class="day"{% if loop.index <= 2 %} open{% endif %}>
@@ -80,17 +100,16 @@
     {% endfor %}
   </section>
 
-  <section data-section="preview-ask" class="price-card" aria-labelledby="unlock">
-    <h2 id="unlock">Unlock weeks 2 to 4 and the guided timer</h2>
-    <p class="price-line">{{ copy.disclosure('price_line') }}</p>
+  <section class="price-card" aria-labelledby="unlock">
+    <h2 id="unlock">Start your plan today</h2>
     <ul class="disclosure-list">
-      {% for key, text in copy.disclosures.items() %}{% if key != 'price_line' %}<li>{{ text }}</li>{% endif %}{% endfor %}
-      <li>Week 1 above is yours either way.</li>
+      {% for item in unlock_items %}<li>{{ item }}</li>{% endfor %}
     </ul>
-    <a class="btn-cta" href="/checkout">Unlock weeks 2 to 4 <span aria-hidden="true">&rarr;</span></a>
-    <small>Or keep week 1 and do nothing. It cost nothing and no card detail was asked for.</small>
+    <a class="btn-cta" href="#plans">Choose my plan <span aria-hidden="true">&rarr;</span></a>
+    <small>{{ cancel_line }}</small>
   </section>
 
+  <p class="note-small"><a href="/summary">Review or change your answers</a></p>
   <p class="plan-ref">
     Plan reference <code>{{ plan.profile_signature }}</code>. Same {{ total }} answers, same plan, every time.
     {% if llm_live %}The coach note was written by a language model and checked against our copy rules.{% else %}Every sentence on this page was written by us.{% endif %}

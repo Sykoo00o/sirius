@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Your compatibility score &middot; {{ brand }}{% endblock %}
+{% block body_class %}kd quiz-body{% endblock %}
+{% block extra_styles %}{% endblock %}
+{% block main_class %}{% endblock %}
+{% block header %}{% include "_flow_header.html" %}{% endblock %}
+
+{#
+  The score is derived, not fixed: `main.compatibility` reads the plan and drops from High to Good
+  whenever an answer means a clinician should be seen first, and the note says so.
+#}
+{% block main %}
+<div class="quiz-main screen-in">
+  <section class="compat center">
+    <span class="eyebrow">Your result</span>
+    <h1 class="fact-title">Your compatibility score with a kegel plan</h1>
+    <div class="compat-ring" style="--pct:{{ score.pct }}">
+      <svg viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="52" fill="none" stroke="#e7f3f1" stroke-width="12"/><circle class="arc" cx="60" cy="60" r="52" fill="none" stroke="url(#cg)" stroke-width="12" stroke-linecap="round" pathLength="100" stroke-dasharray="{{ score.pct }} 100"/><defs><linearGradient id="cg" x1="0" x2="1"><stop offset="0" stop-color="#0b6f78"/><stop offset="1" stop-color="#157a5a"/></linearGradient></defs></svg>
+      <div class="label"><b>{{ score.level }}</b><small>compatibility</small></div>
+    </div>
+    <p class="compat-note">{{ score.note }}</p>
+    <dl class="kv compat-kv">
+      <div><dt>Focus</dt><dd>{{ plan.focus }}</dd></div>
+      <div><dt>Starting level</dt><dd>{{ plan.level_name }}</dd></div>
+      <div><dt>Daily time</dt><dd>{{ plan.minutes }} minutes</dd></div>
+      <div><dt>Daily drill</dt><dd>{{ plan.drill_name }}</dd></div>
+    </dl>
+    {% if plan.safety_note %}<div class="safety" style="text-align:left"><b>Before you start</b>{{ plan.safety_note }}</div>{% endif %}
+    <div class="quiz-cta"><a class="btn-cta" href="/email">Continue <span aria-hidden="true">&rarr;</span></a></div>
+  </section>
+</div>
+{% endblock %}

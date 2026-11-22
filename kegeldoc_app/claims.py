@@ -206,7 +206,7 @@ def rendered_disclosures(slots: Slots) -> list[tuple[str, str, str]]:
         ),
         (
             "renewal_line",
-            f"Your trial auto-renews into a monthly subscription at "
+            f"Your plan auto-renews into a monthly subscription at "
             f"{slots.rebill_per_month}. Based on today, that first renewal falls about "
             f"{slots.renewal_date}.",
             "checkout card, under the price line",

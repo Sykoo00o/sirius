@@ -37,6 +37,7 @@ from typing import Any
 import billing_store
 import save_offer
 import storage
+import plans
 import stripe_billing
 import telemetry
 from billing_store import BillingStore
@@ -248,22 +249,29 @@ class BillingService:
         labelled estimate when we do not.
         """
         return build_copy(
-            self.settings,
+            self.plan_settings(subscription),
             period_end_iso=(subscription or {}).get("current_period_end", ""))
+
+    def plan_settings(self, subscription: dict[str, Any] | None = None):
+        """Settings priced as the plan this subscription bought (base settings without one)."""
+        if not subscription or not subscription.get("trial_amount_minor"):
+            return self.settings
+        return plans.settings_for(self.settings, plans.for_amount(
+            self.settings, int(subscription["trial_amount_minor"])))
 
     # ---- checkout ----------------------------------------------------------
 
-    def checkout_trial_end_epoch(self) -> int:
+    def checkout_trial_end_epoch(self, days: int | None = None) -> int:
         """End of the trial, as the processor will store it.
 
         Anchored on *now*, which is when the charge succeeds. A customer who opens checkout at
         23:50 and pays at 00:05 gets seven days from the charge, not from the page load, and
         `trial_days` from the day the money moved is what our disclosure promises.
         """
-        return int(time.time()) + self.settings.trial_days * 86400
+        return int(time.time()) + (days or self.settings.trial_days) * 86400
 
     def create_session(self, *, visitor_key: str, email: str, plan_signature: str,
-                       origin: str = "") -> dict[str, Any]:
+                       origin: str = "", option: plans.PlanOption | None = None) -> dict[str, Any]:
         """Create the Stripe Checkout session, or raise.
 
         `visitor_key` rides along as `client_reference_id` *and* in metadata: the first is
@@ -274,7 +282,9 @@ class BillingService:
         if self.client is None:
             raise stripe_billing.StripeUnavailable(self.rehearsal_reason)
         base = origin or self.settings.public_url
+        option = option or plans.options(self.settings)[0]
         metadata = {
+            "plan_option": option.key,
             "visitor_key": visitor_key,
             "plan_signature": plan_signature,
             "offer_id": self.settings.brand_name,
@@ -285,17 +295,17 @@ class BillingService:
             cancel_url=f"{base}/checkout/cancelled",
             customer_email=email,
             client_reference_id=visitor_key,
-            trial_amount_minor=self.settings.trial_amount_minor,
-            trial_days=self.settings.trial_days,
+            trial_amount_minor=option.amount_minor,
+            trial_days=option.days,
             rebill_amount_minor=self.settings.rebill_amount_minor,
             currency=self.settings.currency,
-            trial_end_epoch=self.checkout_trial_end_epoch(),
+            trial_end_epoch=self.checkout_trial_end_epoch(option.days),
             metadata=metadata,
         )
 
     def checkout_complete(self, *, visitor_key: str, session_id: str, email: str,
                           plan_signature: str, answers: dict[str, Any],
-                          coach_note: str = "") -> dict[str, Any]:
+                          coach_note: str = "", plan_key: str = "") -> dict[str, Any]:
         """Turn a returned Checkout session into a subscription row, and send the receipt.
 
         Reads the subscription back from the processor rather than trusting what the redirect
@@ -325,9 +335,13 @@ class BillingService:
             details = str((session.get("customer_details") or {}).get("email") or "")
             if details:
                 email = details
+            # The processor's record of which plan was sold beats the browser's claim.
+            plan_key = str((session.get("metadata") or {}).get("plan_option") or plan_key)
+
+        option = plans.find(self.settings, plan_key) or plans.options(self.settings)[0]
 
         trial_end_iso = epoch_to_iso(subscription.get("trial_end")
-                                     or self.checkout_trial_end_epoch())
+                                     or self.checkout_trial_end_epoch(option.days))
         period_end_iso = epoch_to_iso(stripe_billing.period_end_epoch(subscription))
         brand, last4 = stripe_billing.card_of(subscription) if subscription else ("", "")
 
@@ -354,7 +368,7 @@ class BillingService:
             subscription_item_id=stripe_billing.item_id(subscription) or "",
             email=email,
             status="trialing",
-            trial_amount_minor=self.settings.trial_amount_minor,
+            trial_amount_minor=option.amount_minor,
             rebill_amount_minor=self.settings.rebill_amount_minor,
             currency=self.settings.currency,
             trial_end=trial_end_iso,
@@ -399,8 +413,8 @@ class BillingService:
                    detail={"live": self.live})
         if self.live:
             self.track("trial_paid", row=row, reference_id=session_id,
-                       amount_minor=self.settings.trial_amount_minor,
-                       gross_volume_minor=self.settings.trial_amount_minor,
+                       amount_minor=option.amount_minor,
+                       gross_volume_minor=option.amount_minor,
                        card_funding=card["funding"], card_country=card["country"],
                        idempotency_key=f"trial_paid:{session_id or visitor_key}",
                        detail={"via": "checkout"})

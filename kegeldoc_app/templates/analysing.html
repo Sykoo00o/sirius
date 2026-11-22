@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Analysing your answers &middot; {{ brand }}{% endblock %}
+{% block body_class %}kd quiz-body{% endblock %}
+{% block extra_styles %}<noscript><meta http-equiv="refresh" content="6;url=/welcome"></noscript>{% endblock %}
+{% block main_class %}{% endblock %}
+{% block header %}{% include "_flow_header.html" %}{% endblock %}
+
+{#
+  After the last answer: one bar per thing the plan builder reads, filled in turn, then on to the
+  welcome screen. Without JavaScript the bars render full, a meta refresh moves on after six
+  seconds, and the Continue link is always there.
+#}
+{% block main %}
+<div class="quiz-main screen-in">
+  <section class="analysis" aria-live="polite">
+    <span class="eyebrow">Almost there</span>
+    <h1 class="fact-title">Analysing your answers</h1>
+    <p class="muted">Matching every answer to the holds, rests and daily drill in your plan.</p>
+    <ul class="a-bars" id="a-bars">
+      {% for label in bars %}
+        <li>
+          <div class="a-row"><span>{{ label }}</span><b class="a-pct">100%</b></div>
+          <div class="a-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" aria-label="{{ label }}"><i style="width:100%"></i></div>
+        </li>
+      {% endfor %}
+    </ul>
+    <div class="quiz-cta"><a class="btn-cta" id="a-next" href="/welcome">Continue <span aria-hidden="true">&rarr;</span></a></div>
+  </section>
+</div>
+<script>
+(function () {
+  var rows = Array.prototype.slice.call(document.querySelectorAll('#a-bars li'));
+  var next = document.getElementById('a-next');
+  if (!rows.length || !window.setInterval) return;
+  next.setAttribute('aria-disabled', 'true'); next.classList.add('is-waiting');
+  rows.forEach(function (li) { set(li, 0); });
+  function set(li, pct) {
+    li.querySelector('i').style.width = pct + '%';
+    li.querySelector('.a-pct').textContent = pct + '%';
+    li.querySelector('.a-track').setAttribute('aria-valuenow', pct);
+    li.classList.toggle('done', pct >= 100);
+  }
+  var i = 0, pct = 0;
+  // setInterval rather than rAF: a backgrounded tab must still finish the analysis.
+  var timer = setInterval(function () {
+    pct = Math.min(100, pct + 4 + Math.round(Math.random() * 5));
+    set(rows[i], pct);
+    if (pct >= 100) { i += 1; pct = 0; }
+    if (i >= rows.length) {
+      clearInterval(timer);
+      next.removeAttribute('aria-disabled'); next.classList.remove('is-waiting');
+      setTimeout(function () { window.location.href = '/welcome'; }, 700);
+    }
+  }, 60);
+})();
+</script>
+{% endblock %}

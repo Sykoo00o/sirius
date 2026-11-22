@@ -341,12 +341,12 @@ def test_quiz_steps_and_completion_are_counted(tele_client):
     assert tele_client.events.event_counts(today()).get("quiz_started") == 1, \
         "the page that renders the first question is what starts the quiz"
     walk(tele_client)
-    get(tele_client, "/summary")
+    get(tele_client, "/analysing")
     counts = tele_client.events.event_counts(today())
     assert counts.get("quiz_started") == 1, counts
     assert counts.get("quiz_completed") == 1, counts
-    # `/summary` is reachable twice on the way to checkout; a finished quiz is finished.
-    get(tele_client, "/summary")
+    # `/analysing` is where the last answer lands, and a reload is not a second finished quiz.
+    get(tele_client, "/analysing")
     assert tele_client.events.event_counts(today())["quiz_completed"] == 1
 
 

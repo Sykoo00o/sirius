@@ -154,6 +154,11 @@ class FunnelSettings:
     rebill_amount_minor: int = 3900
     currency: str = "usd"
     refund_window_days: int = 14
+    #: The paywall's longer plans: one charge up front for 4 or 12 weeks, then the same
+    #: monthly rebill as the 1-week plan. The 1-week plan *is* the trial above, so its price
+    #: stays in `trial_amount_minor` and every existing disclosure keeps one source.
+    plan_4w_amount_minor: int = 999
+    plan_12w_amount_minor: int = 1999
 
     # ---- save-offer sequence (`LANE_C_PHASE0_STEP1-2.md` §2.3) --------------
     # The three retention options are shown only when the corresponding Stripe object is
@@ -243,6 +248,10 @@ class FunnelSettings:
             currency=os.getenv("FUNNEL_CURRENCY", "usd").lower(),
             refund_window_days=_int("FUNNEL_REFUND_WINDOW_DAYS",
                                     default=cls.refund_window_days),
+            plan_4w_amount_minor=_int("FUNNEL_PLAN_4W_AMOUNT_MINOR",
+                                      default=cls.plan_4w_amount_minor),
+            plan_12w_amount_minor=_int("FUNNEL_PLAN_12W_AMOUNT_MINOR",
+                                       default=cls.plan_12w_amount_minor),
             lite_amount_minor=_int("FUNNEL_LITE_AMOUNT_MINOR", default=cls.lite_amount_minor),
             pause_days=_int("FUNNEL_PAUSE_DAYS", default=cls.pause_days),
             discount_coupon_id=os.getenv("FUNNEL_DISCOUNT_COUPON_ID", "").strip(),

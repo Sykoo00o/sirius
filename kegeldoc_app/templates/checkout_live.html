@@ -21,16 +21,17 @@
 #}
 <section class="mx-auto max-w-copy px-4 pt-8 pb-16">
 
-  <a href="/preview" class="text-sm text-muted underline decoration-line underline-offset-4 hover:text-ink">&larr; Back to week 1</a>
+  <a href="/preview#plans" class="text-sm text-muted underline decoration-line underline-offset-4 hover:text-ink">&larr; Back to the plans</a>
 
-  <p class="eyebrow mt-5">{{ copy.trial_days }}-day trial &middot; cancel in one click</p>
-  <h1 class="band-heading mt-4">Unlock weeks 2 to 4</h1>
+  <p class="eyebrow mt-5">{{ option.weeks }} week{{ 's' if option.weeks > 1 }} &middot; cancel in one click</p>
+  <h1 class="band-heading mt-4">Your {{ option.name }}</h1>
   <p class="mt-2 text-muted leading-relaxed">
     Your plan reference is <code class="rounded bg-cream border border-line px-1.5 py-0.5 text-sm">{{ plan_signature }}</code>,
     so this screen and the preview are provably the same plan.
   </p>
 
   <form method="post" action="/checkout/start" class="mt-7 space-y-4">
+    <input type="hidden" name="plan" value="{{ option.key }}">
 
     {# --- checklist slots 1-4, inside the form, above the button --- #}
     <div data-section="price-block" class="rounded-3xl border-2 border-ember/40 bg-ember-soft p-6 sm:p-7 shadow-[0_4px_14px_rgba(232,89,12,0.10)]">

@@ -267,6 +267,10 @@ def walk(client: TestClient, upto: int | None = None) -> None:
         # Alternate encodings so both paths stay exercised without a second suite.
         response = post(client, f"/onboarding/{index}", pairs, multipart=bool(index % 2))
         assert response.status_code in (200, 302), (index, response.status_code)
+    if upto is None:
+        # The paywall sits behind the email screen, so a finished walk includes it.
+        response = post(client, "/email", [("email", "walker@example.com")])
+        assert response.status_code in (200, 302, 303), response.status_code
 
 
 def assert_app_and_suite_agree_on_stripe_classes(app, our_module=None) -> None:

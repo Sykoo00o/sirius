@@ -55,6 +55,7 @@ from fastapi.templating import Jinja2Templates
 
 import billing as billing_module
 import claims
+import plans
 import save_offer
 import stripe_billing
 import telemetry
@@ -251,7 +252,7 @@ def form_answers(stored: dict[str, Any]) -> dict[str, Any]:
 PAGE_EVENTS: tuple[tuple[str, str, bool], ...] = (
     ("/", "lp_view", True),
     ("/onboarding", "quiz_started", True),
-    ("/summary", "quiz_completed", True),
+    ("/analysing", "quiz_completed", True),
     ("/preview", "preview_shown", False),
     ("/checkout", "checkout_viewed", False),
 )
@@ -537,9 +538,151 @@ async def onboarding_submit(
     # Every step posts to its own route, so an invalid answer can 422 the page the
     # visitor is actually on rather than the one it was submitted from.
     return RedirectResponse(
-        url="/summary" if is_complete(stored) else f"/onboarding/{next_unanswered(stored)}",
+        url="/analysing" if is_complete(stored) else f"/onboarding/{next_unanswered(stored)}",
         status_code=302,
     )
+
+
+# ---------------------------------------------------------------------------
+# After the quiz: analysing -> welcome -> compatibility -> email -> ready -> paywall
+# ---------------------------------------------------------------------------
+
+EMAIL_KEY = "_email"
+EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}")
+
+#: The analysis bars, per track. They describe what the builder really reads from the answers,
+#: so the screen is a progress display for work the plan does, not theatre about work it does not.
+ANALYSIS_BARS: dict[str, tuple[str, ...]] = {
+    "men": ("Pelvic floor strength and control", "Erection and ejaculation answers",
+            "Bladder and urgency patterns", "Lifestyle factors", "Building your personal plan"),
+    "women": ("Pelvic floor strength and control", "Leaks, birth and intimacy answers",
+              "Bladder and urgency patterns", "Lifestyle factors", "Building your personal plan"),
+}
+
+
+def _post_quiz_gate(request: Request, *, need_email: bool = False
+                    ) -> tuple[dict[str, Any], RedirectResponse | None]:
+    stored = answers_for(request)
+    if not stored:
+        return stored, RedirectResponse(url="/onboarding/0", status_code=302)
+    if not is_complete(stored):
+        return stored, RedirectResponse(url=f"/onboarding/{missing_indices(stored)}",
+                                        status_code=302)
+    if need_email and not _email_of(stored):
+        return stored, RedirectResponse(url="/email", status_code=302)
+    return stored, None
+
+
+def _email_of(stored: dict[str, Any]) -> str:
+    return (stored.get(EMAIL_KEY) or [""])[0]
+
+
+def _track_of(stored: dict[str, Any]) -> str:
+    return "women" if (stored.get("track") or [""])[0] == "women" else "men"
+
+
+def compatibility(plan: Plan) -> dict[str, str]:
+    """How well a kegel plan fits these answers. High unless an answer needs a clinician first."""
+    if plan.safety_note:
+        return {"level": "Good", "pct": "72",
+                "note": "A kegel plan fits your goals, starting gently. One of your answers is "
+                        "worth checking with a doctor or pelvic health physiotherapist first."}
+    return {"level": "High", "pct": "94",
+            "note": "Your answers match the people a structured, daily kegel plan is built for."}
+
+
+@app.get("/analysing", response_class=HTMLResponse)
+async def analysing(request: Request) -> HTMLResponse:
+    stored, blocked = _post_quiz_gate(request)
+    if blocked:
+        return blocked
+    return templates.TemplateResponse(
+        request, "analysing.html",
+        page_context(request, bars=ANALYSIS_BARS[_track_of(stored)], progress=100))
+
+
+@app.get("/welcome", response_class=HTMLResponse)
+async def welcome(request: Request) -> HTMLResponse:
+    stored, blocked = _post_quiz_gate(request)
+    if blocked:
+        return blocked
+    return templates.TemplateResponse(
+        request, "welcome.html",
+        page_context(request, track=_track_of(stored), total=_answer_count(stored)))
+
+
+@app.get("/compatibility", response_class=HTMLResponse)
+async def compatibility_page(request: Request) -> HTMLResponse:
+    stored, blocked = _post_quiz_gate(request)
+    if blocked:
+        return blocked
+    plan = build_plan(profile_from_answers(stored))
+    return templates.TemplateResponse(
+        request, "compatibility.html",
+        page_context(request, plan=plan, score=compatibility(plan), track=_track_of(stored)))
+
+
+@app.get("/email", response_class=HTMLResponse)
+async def email_page(request: Request) -> HTMLResponse:
+    stored, blocked = _post_quiz_gate(request)
+    if blocked:
+        return blocked
+    return templates.TemplateResponse(
+        request, "email.html", page_context(request, email=_email_of(stored), error=""))
+
+
+@app.post("/email", response_class=HTMLResponse)
+async def email_submit(request: Request, email: str | None = Form(None)) -> HTMLResponse:
+    stored, blocked = _post_quiz_gate(request)
+    if blocked:
+        return blocked
+    value = (email or "").strip()
+    if not EMAIL_RE.fullmatch(value) or len(value) > 254:
+        return templates.TemplateResponse(
+            request, "email.html",
+            page_context(request, email=value,
+                         error="Enter a working email address so we can send your plan."),
+            status_code=422)
+    stored[EMAIL_KEY] = [value]
+    store.append_event(
+        visitor_key=get_visitor(request), status="started", answers=stored,
+        step=len(QUESTIONS), offer_id=OFFER_ID,
+        user_agent=request.headers.get("user-agent", ""))
+    return RedirectResponse(url="/ready", status_code=303)
+
+
+@app.get("/ready", response_class=HTMLResponse)
+async def ready(request: Request) -> HTMLResponse:
+    stored, blocked = _post_quiz_gate(request, need_email=True)
+    if blocked:
+        return blocked
+    plan = build_plan(profile_from_answers(stored))
+    return templates.TemplateResponse(
+        request, "ready.html",
+        page_context(request, plan=plan, email=_email_of(stored), total=_answer_count(stored)))
+
+
+def plan_cards() -> list[dict[str, Any]]:
+    """One card per paywall plan, each carrying its own price and renewal disclosures."""
+    cards = []
+    for option in plans.options(settings):
+        copy_obj = build_copy(plans.settings_for(settings, option))
+        cards.append({
+            "option": option,
+            "terms": copy_obj,
+            "price": copy_obj.trial_amount,
+            "per_day": money(round(option.per_day_minor()), settings.currency),
+            "selected": option.key == plans.DEFAULT_KEY,
+        })
+    return cards
+
+
+def _plan_copy(key: str | None) -> tuple[plans.PlanOption, Copy] | None:
+    """The chosen plan and its copy. No key means the 1-week plan; an unknown key means none."""
+    option = plans.find(settings, key) if key else plans.options(settings)[0]
+    if option is None:
+        return None
+    return option, build_copy(plans.settings_for(settings, option))
 
 
 # ---------------------------------------------------------------------------
@@ -622,6 +765,9 @@ async def preview(request: Request) -> HTMLResponse:
     if not is_complete(stored):
         return RedirectResponse(url=f"/onboarding/{missing_indices(stored)}", status_code=302)
 
+    if not _email_of(stored):
+        return RedirectResponse(url="/email", status_code=302)
+
     plan, coach_source = await build_preview(request)
     copy_obj = build_copy(settings)
     store.append_event(
@@ -643,7 +789,8 @@ async def preview(request: Request) -> HTMLResponse:
             request, copy_obj=copy_obj, plan=plan, profile=profile_from_answers(stored),
             total=_answer_count(stored), locked_weeks=WEEK_ARCS[1:],
             unlock_items=ARTIFACT_PAID, free_items=ARTIFACT_FREE,
-            llm_live=(coach_source == "llm"),
+            llm_live=(coach_source == "llm"), cards=plan_cards(),
+            score=compatibility(plan),
         ),
     )
 
@@ -687,9 +834,12 @@ def _renewal_line_for(copy_obj: Copy) -> str:
 async def checkout(request: Request) -> HTMLResponse:
     if blocked := _checkout_gate(request):
         return blocked
+    chosen = _plan_copy(request.query_params.get("plan"))
+    if chosen is None:
+        return RedirectResponse(url="/preview", status_code=302)
+    option, copy_obj = chosen
     plan_signature = profile_from_answers(answers_for(request)).signature()
 
-    copy_obj = build_copy(settings)
     store.append_event(
         visitor_key=get_visitor(request),
         status="checkout_viewed",
@@ -708,14 +858,14 @@ async def checkout(request: Request) -> HTMLResponse:
             request, "checkout.html",
             page_context(request, copy_obj=copy_obj, offer_id=OFFER_ID,
                          plan_signature=plan_signature, trust_points=TRUST_POINTS,
-                         unlock_items=ARTIFACT_PAID),
+                         unlock_items=ARTIFACT_PAID, option=option),
         )
     return templates.TemplateResponse(
         request, "checkout_live.html",
         page_context(request, copy_obj=copy_obj, offer_id=OFFER_ID,
                      plan_signature=plan_signature, trust_points=TRUST_POINTS,
                      unlock_items=ARTIFACT_PAID, renewal_line=_renewal_line_for(copy_obj),
-                     email="", error=""),
+                     email=_email_of(answers_for(request)), error="", option=option),
     )
 
 
@@ -729,8 +879,13 @@ async def checkout_rehearsal(request: Request) -> HTMLResponse:
     """
     if blocked := _checkout_gate(request):
         return blocked
+    form = await request.form()
+    chosen = _plan_copy(str(form.get("plan") or "") or None)
+    if chosen is None:
+        return RedirectResponse(url="/preview", status_code=303)
+    option, plan_copy = chosen
     if billing_client() is not None:
-        return RedirectResponse(url="/checkout", status_code=303)
+        return RedirectResponse(url=f"/checkout?plan={option.key}", status_code=303)
 
     stored = answers_for(request)
     visitor_key = get_visitor(request)
@@ -754,10 +909,10 @@ async def checkout_rehearsal(request: Request) -> HTMLResponse:
                   # crosses both paths on one day is still one committed start.
                   idempotency_key=f"trial_started:{visitor_key}:"
                                   f"{telemetry.day_of(telemetry.utc_now())}",
-                  detail={"live": False, "via": "rehearsal"})
+                  detail={"live": False, "via": "rehearsal", "plan": option.key})
     return templates.TemplateResponse(
         request, "rehearsal_done.html",
-        page_context(request, copy_obj=build_copy(settings)),
+        page_context(request, copy_obj=plan_copy, option=option),
     )
 
 
@@ -778,16 +933,19 @@ async def checkout_start(request: Request) -> HTMLResponse:
         return RedirectResponse(url="/checkout", status_code=303)
 
     form = await request.form()
+    chosen = _plan_copy(str(form.get("plan") or "") or None)
+    if chosen is None:
+        return RedirectResponse(url="/preview", status_code=303)
+    option, copy_obj = chosen
     email = str(form.get("email") or "").strip()
-    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}", email):
-        copy_obj = build_copy(settings)
+    if not EMAIL_RE.fullmatch(email):
         return templates.TemplateResponse(
             request, "checkout_live.html",
             page_context(
                 request, copy_obj=copy_obj, offer_id=OFFER_ID,
                 plan_signature=profile_from_answers(answers_for(request)).signature(),
                 trust_points=TRUST_POINTS, unlock_items=ARTIFACT_PAID,
-                renewal_line=_renewal_line_for(copy_obj), email=email,
+                renewal_line=_renewal_line_for(copy_obj), email=email, option=option,
                 error="We need a working email address: the receipt is the record of what "
                       "you agreed to, and it carries your cancel link."),
             status_code=422,
@@ -799,7 +957,7 @@ async def checkout_start(request: Request) -> HTMLResponse:
         session = await anyio.to_thread.run_sync(
             lambda: billing.create_session(
                 visitor_key=get_visitor(request), email=email,
-                plan_signature=plan_signature, origin=_origin(request)))
+                plan_signature=plan_signature, origin=_origin(request), option=option))
     except stripe_billing.StripeError as exc:
         log.error("checkout session creation failed: %s", exc)
         return templates.TemplateResponse(
@@ -825,7 +983,8 @@ async def checkout_start(request: Request) -> HTMLResponse:
 
 
 @app.get("/checkout/complete", response_class=HTMLResponse)
-async def checkout_complete(request: Request, session_id: str = "") -> HTMLResponse:
+async def checkout_complete(request: Request, session_id: str = "",
+                            plan: str = "") -> HTMLResponse:
     """Landing page after Stripe says the card took.
 
     Deliberately does not require the quiz cookie. The session id is looked up at the
@@ -842,7 +1001,7 @@ async def checkout_complete(request: Request, session_id: str = "") -> HTMLRespo
                 visitor_key=visitor_key, session_id=session_id, email="",
                 plan_signature=(profile_from_answers(stored).signature() if stored else ""),
                 answers=form_answers(stored) if stored else {},
-                coach_note=""))
+                coach_note="", plan_key=plan))
     except stripe_billing.StripeError as exc:
         log.error("checkout completion rejected (%s): %s", session_id, exc)
         return templates.TemplateResponse(
@@ -887,8 +1046,8 @@ async def checkout_cancelled(request: Request) -> HTMLResponse:
         page_context(
             request, headline="Checkout closed, nothing charged.",
             detail="You left the payment page, so no subscription exists and no money moved. "
-                   "Week 1 is still yours, free, and this page stays open as long as you want "
-                   "to keep reading it.",
+                   "Your answers and your plan are saved, so you can pick a plan again "
+                   "whenever you are ready.",
             charged_note="No charge was made and nothing was saved."),
     )
 
@@ -922,7 +1081,7 @@ def _subscription_context(request: Request, row: dict[str, Any]) -> dict[str, An
     """
     copy_obj = billing.copy(row)
     period_end = iso_to_local_date(row.get("current_period_end", ""))
-    renewal, is_real = next_bill_date(period_end, settings.trial_days)
+    renewal, is_real = next_bill_date(period_end, billing.plan_settings(row).trial_days)
     if is_real:
         # Charges are armed and a real period end is in hand, which is the fact `/health` says it
         # wants to know before it stops calling every renewal date an estimate. A process-local
@@ -979,7 +1138,7 @@ def _billing_note(row: dict[str, Any], copy_obj: Copy) -> str:
             "they match the invoice you will receive.")
     return (
         "This subscription has no payment-provider record yet, so the date above is the "
-        f"{settings.trial_days}-day trial length counted from checkout. It is confirmed by the "
+        f"{billing.plan_settings(row).trial_days}-day plan length counted from checkout. It is confirmed by the "
         "receipt email as soon as a charge exists.")
 
 
@@ -1428,7 +1587,8 @@ def selfcheck_render() -> dict[str, Any]:
                 _OfflineRequest(), copy_obj=copy_obj_for_check, plan=plan,
                 profile=profile_from_answers(CHECK_ANSWERS), total=_answer_count(CHECK_ANSWERS),
                 locked_weeks=WEEK_ARCS[1:], unlock_items=ARTIFACT_PAID,
-                free_items=ARTIFACT_FREE, llm_live=False,
+                free_items=ARTIFACT_FREE, llm_live=False, cards=plan_cards(),
+                score=compatibility(plan),
             ))
         needles = [
             ("Mon", "the first day of week 1"), ("Sun", "the last day of week 1"),

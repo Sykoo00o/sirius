@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Welcome &middot; {{ brand }}{% endblock %}
+{% block body_class %}kd quiz-body{% endblock %}
+{% block extra_styles %}{% endblock %}
+{% block main_class %}{% endblock %}
+{% block header %}{% include "_flow_header.html" %}{% endblock %}
+
+{% block main %}
+<div class="quiz-main screen-in">
+  <section class="welcome center">
+    <div class="welcome-art" aria-hidden="true">
+      <svg viewBox="0 0 180 180"><circle cx="90" cy="90" r="80" fill="#e7f3f1"/><circle cx="90" cy="90" r="58" fill="#fff"/><path d="M62 92l18 18 38-40" fill="none" stroke="#0b6f78" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <span class="eyebrow">Congratulations</span>
+    <h1 class="fact-title">Congratulations on joining millions of {{ track }} prioritizing sexual wellness</h1>
+    <p class="muted">Your {{ total }} answers are in. Next, see how well a kegel plan fits you.</p>
+    <ul class="welcome-points">
+      <li>Built from your own answers</li>
+      <li>A few minutes a day, at home</li>
+      <li>Cancel in one click, any time</li>
+    </ul>
+    <div class="quiz-cta"><a class="btn-cta" href="/compatibility">Continue <span aria-hidden="true">&rarr;</span></a></div>
+  </section>
+</div>
+{% endblock %}
