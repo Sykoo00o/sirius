@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}Checkout &middot; {{ brand }}{% endblock %}
+
+{% block main %}
+{#
+  Checkout, rehearsal mode: no key configured, or FUNNEL_CHARGES_ENABLED false. Split from
+  `checkout_live.html` rather than dual-mode with `{% if %}` blocks, for a reason specific to
+  this page: the *absence* of a real payment widget is itself a disclosure, and a template that
+  could silently render the wrong branch is a template where a rehearsal screen full of
+  disabled inputs can reach production carrying a live-looking page, or the reverse.
+
+  Layout rule, straight from the disclosure checklist: the recurring amount sits adjacent to
+  the card field, on one screen, not in a modal, not behind a tooltip, not under a fold. So the
+  price block is *inside* the form element rather than beside it: on a narrow screen the
+  disclosure and the input cannot be scrolled apart, which is the property that matters.
+  `checkout_live.html` keeps that nesting for the same reason.
+#}
+<section class="mx-auto max-w-copy px-4 pt-8 pb-16">
+
+  <a href="/preview" class="text-sm text-muted underline decoration-line underline-offset-4 hover:text-ink">&larr; Back to week 1</a>
+
+  <p class="eyebrow mt-5">No charge yet in rehearsal</p>
+  <h1 class="band-heading mt-4">Unlock weeks 2 to 4</h1>
+  <p class="mt-2 text-muted leading-relaxed">
+    Your plan reference is <code class="rounded bg-cream border border-line px-1.5 py-0.5 text-sm">{{ plan_signature }}</code>,
+    so this screen and the preview are provably the same plan.
+  </p>
+
+  <form method="post" class="mt-7 space-y-4" novalidate>
+
+    {# --- price block: checklist slots 1-4, adjacent to the card field --- #}
+    <div data-section="price-block" class="rounded-3xl border-2 border-ember/40 bg-ember-soft p-6 sm:p-7 shadow-[0_4px_14px_rgba(232,89,12,0.10)]">
+      <p class="text-lg sm:text-xl font-bold leading-snug text-balance">{{ copy.disclosure('price_line') }}</p>
+      <ul class="mt-3 space-y-1.5 text-sm">
+        {% for key in ('renewal_line', 'refund_line', 'cancel_line') %}
+          <li class="flex gap-2"><span class="text-ember-dark shrink-0 mt-0.5" aria-hidden="true">&#10003;</span><span>{{ copy.disclosure(key) }}</span></li>
+        {% endfor %}
+      </ul>
+      <p class="mt-3 text-sm">{{ copy.renewal_after_line }}</p>
+      <p class="mt-3 text-xs text-muted">
+        Offer <code>{{ offer_id }}</code>. One plan, one price, one variant: no upsell
+        popup sits between you and this button.
+      </p>
+    </div>
+
+    {# --- what unlocks, restated at the moment of paying --- #}
+    <div class="surface-float rounded-3xl bg-white p-6">
+      <h3 class="eyebrow-title">What {{ copy.trial_amount }} gets you for {{ copy.trial_days }} days</h3>
+      <ul class="mt-3 space-y-2 text-sm">
+        {% for item in unlock_items %}
+          <li class="flex gap-2"><span class="text-ember shrink-0" aria-hidden="true">&#43;</span><span>{{ item }}</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    {# --- card fields, inert in rehearsal --- #}
+    <fieldset class="rounded-3xl border border-line bg-white p-6">
+      <legend class="sr-only">Payment details</legend>
+
+      <label class="block text-sm font-medium" for="card-holder">Name on card</label>
+      <input id="card-holder" name="card_holder" type="text" autocomplete="cc-name" disabled
+             class="mt-1.5 w-full rounded-2xl border border-line bg-cream px-4 py-3.5 text-base disabled:cursor-not-allowed"
+             placeholder="Not collected in rehearsal">
+
+      <label class="block text-sm font-medium mt-4" for="card-number">
+        Card number
+        <span class="font-normal text-muted">&middot; charged {{ copy.trial_amount }} today, then {{ copy.rebill_per_month }}</span>
+      </label>
+      {# Label carries the recurring amount, which is checklist slot 2 verbatim: a
+         card field labelled only with the trial amount is the silent-enrolment pattern. #}
+      <input id="card-number" name="card_number" inputmode="numeric" autocomplete="cc-number" disabled
+             class="mt-1.5 w-full rounded-xl border border-line bg-cream px-3.5 py-3 text-base tabular-nums disabled:cursor-not-allowed"
+             placeholder="Rehearsal only, nothing is stored">
+
+      <div class="grid grid-cols-2 gap-3 mt-4">
+        <div>
+          <label class="block text-sm font-medium" for="card-exp">Expiry</label>
+          <input id="card-exp" name="card_exp" inputmode="numeric" autocomplete="cc-exp" disabled
+                 class="mt-1.5 w-full rounded-xl border border-line bg-cream px-3.5 py-3 text-base tabular-nums disabled:cursor-not-allowed"
+                 placeholder="MM / YY">
+        </div>
+        <div>
+          <label class="block text-sm font-medium" for="card-cvc">CVC</label>
+          <input id="card-cvc" name="card_cvc" inputmode="numeric" autocomplete="cc-csc" disabled
+                 class="mt-1.5 w-full rounded-xl border border-line bg-cream px-3.5 py-3 text-base tabular-nums disabled:cursor-not-allowed"
+                 placeholder="&#8226;&#8226;&#8226;">
+        </div>
+      </div>
+
+      <label class="block text-sm font-medium mt-4" for="email">Email for your receipt</label>
+      <input id="email" name="email" type="email" autocomplete="email" disabled
+             class="mt-1.5 w-full rounded-xl border border-line bg-cream px-4 py-3.5 text-base disabled:cursor-not-allowed"
+             placeholder="The receipt repeats the price and renewal date">
+      <p class="mt-2 text-xs text-muted leading-relaxed">
+        The receipt is a disclosure record: amount charged, renewal amount, renewal date, a
+        cancel link, and a reply address somebody reads. Disabled here because nothing is sent.
+      </p>
+    </fieldset>
+
+    {# Auto-renewal on by default is acceptable when it is labelled; the thing ICPEN
+       flagged was making it impossible to decline *during* checkout. So the state is
+       shown as a labelled, checked control, not a hidden assumption. #}
+    <label class="flex items-start gap-3 rounded-2xl border border-line bg-white px-4 py-4 text-sm">
+      <input type="checkbox" checked disabled class="mt-0.5 w-5 h-5 accent-[#cf4a07]">
+      <span>
+        <span class="font-medium">Auto-renew each month</span>
+        <span class="block text-muted mt-0.5">On by default, and labelled as such. Turn it off after
+        purchase from your account page if you would rather we did not renew.</span>
+      </span>
+    </label>
+
+    <p class="text-sm text-muted leading-relaxed">
+      By continuing you agree to the
+      <a class="underline decoration-line underline-offset-2" href="/policy/terms">terms</a>
+      and confirm you have read the
+      <a class="underline decoration-line underline-offset-2" href="/policy/refund">refund policy</a>.
+    </p>
+
+    <button type="submit"
+            class="btn-primary px-6 py-4 text-lg font-semibold">
+      {{ copy.pay_button_label }}
+    </button>
+
+    <p class="text-xs text-muted text-center leading-relaxed">
+      <a class="underline decoration-line underline-offset-2" href="/policy/privacy">Privacy</a> &middot;
+      {{ copy.card_stub_note }}
+    </p>
+  </form>
+
+  <div class="mt-8 space-y-3">
+    {% for heading, body in trust_points %}
+      <div class="rounded-2xl border border-line bg-cream/60 px-4 py-3.5">
+        <h3 class="font-semibold text-sm">{{ heading }}</h3>
+        <p class="text-xs text-muted mt-1 leading-relaxed">{{ body }}</p>
+      </div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

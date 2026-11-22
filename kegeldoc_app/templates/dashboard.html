@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Your account &middot; {{ brand }}{% endblock %}
+
+{% block main %}
+{#
+  The member dashboard. Its compliance job is checklist 6: **next bill date and amount, always
+  visible without navigation**. So the billing block is the first thing on the page, above the
+  plan, on every state, with no accordion and no tab hiding it: a plan you cannot stop reading
+  is a plan you did not read.
+
+  Two honesty rules the markup obeys:
+
+  * A renewal date from the processor renders plainly. A renewal date we estimated because the
+    processor has not answered yet renders with "about" in front of it (`renewal_is_real`),
+    because a disclosed date has to be the real one and we cannot promise a day we have not
+    been given.
+  * The plan shown is the one that was paid for, rebuilt from the answers snapshotted at
+    checkout. A member who clears their cookies still sees the plan they bought, which is the
+    difference between a product and a session.
+#}
+<section class="mx-auto max-w-copy px-4 pt-8 pb-16">
+
+  {% if not subscription %}
+    <p class="eyebrow">Not subscribed yet</p>
+    <h1 class="band-heading mt-4">No plan on this browser yet</h1>
+    <p class="mt-3 text-muted leading-relaxed">
+      Your week 1 preview is still free and still open. Weeks 2 to 4, exports and the weekly
+      adjustments come with the {{ copy.trial_amount }} trial.
+    </p>
+    <div class="mt-6 flex flex-wrap gap-3">
+      <a href="/onboarding" class="btn-primary inline-flex items-center px-6 py-3.5 font-semibold">Start the questionnaire</a>
+      <a href="/preview" class="inline-flex items-center px-6 py-3.5 font-semibold rounded-2xl border border-line bg-white">See week 1</a>
+    </div>
+  {% else %}
+
+  {# ---------- billing: checklist 6, never below the plan ---------- #}
+  <div data-section="billing-summary" class="rounded-3xl border-2 {% if is_cancelled_state %}border-line bg-cream{% else %}border-ember/40 bg-ember-soft{% endif %} p-6">
+    <p class="eyebrow">{% if is_paused %}Paused{% elif is_cancelled_state %}Cancelled, access running{% elif status == 'past_due' %}Payment due{% else %}Active subscription{% endif %}</p>
+
+    {% if is_paused %}
+      <p class="mt-3 text-lg sm:text-xl font-bold leading-snug text-balance">
+        Paused. Nothing is charged until {{ subscription.paused_until_human }}.
+      </p>
+      <p class="mt-2 text-sm leading-relaxed">
+        It restarts by itself on that date at {{ plan_price }}/month. Your plan stays open
+        meanwhile, and you can cancel before it restarts.
+      </p>
+    {% elif is_cancelled_state %}
+      <p class="mt-3 text-lg sm:text-xl font-bold leading-snug text-balance">
+        Cancelled. Nothing more will be charged.
+      </p>
+      <p class="mt-2 text-sm leading-relaxed">
+        You keep the full plan until {{ renewal_label }}. Last charge:
+        {{ charged_amount }} on {{ charged_on }}.
+      </p>
+    {% else %}
+      <p class="mt-3 text-lg sm:text-xl font-bold leading-snug text-balance">
+        {{ next_bill_line }}
+      </p>
+      <p class="mt-2 text-sm leading-relaxed">
+        {{ plan_name }} &middot; {{ charged_amount }} charged {{ charged_on }}{% if card_note %} &middot; paid with {{ card_note }}{% endif %}
+      </p>
+    {% endif %}
+
+    <dl class="mt-5 grid grid-cols-2 gap-3 text-sm">
+      <div class="rounded-2xl bg-white/70 border border-line px-4 py-3">
+        <dt class="text-[11px] uppercase tracking-wide text-muted">Amount</dt>
+        <dd class="mt-0.5 font-bold text-base">{{ plan_price }}</dd>
+      </div>
+      <div class="rounded-2xl bg-white/70 border border-line px-4 py-3">
+        <dt class="text-[11px] uppercase tracking-wide text-muted">
+          {% if is_cancelled_state %}Access until{% elif is_paused %}Resumes{% else %}{% if renewal_is_real %}Next billing date{% else %}Estimated next bill{% endif %}{% endif %}
+        </dt>
+        <dd class="mt-0.5 font-bold text-base">{% if not renewal_is_real and not is_cancelled_state and not is_paused %}about {% endif %}{{ renewal_label }}</dd>
+      </div>
+    </dl>
+
+    {% if not is_cancelled_state %}
+      {# One button, one click, and the cancel happens: no "are you sure", no intermediate
+         page, nothing that has to be answered before the action runs (checklist 7). #}
+      <form method="post" action="/account/cancel" class="mt-5">
+        <button type="submit"
+                class="w-full rounded-2xl border-2 border-ink/20 bg-white px-5 py-3.5 text-base font-semibold hover:border-ink/40">
+          Cancel subscription
+        </button>
+      </form>
+      <p class="mt-2 text-xs text-muted">
+        One click. No phone call, no email hoops, no cancellation fee, and no questions asked
+        before it takes effect.
+      </p>
+    {% else %}
+      <a href="/preview" class="mt-5 inline-flex items-center gap-2 rounded-2xl border-2 border-ink/20 bg-white px-5 py-3.5 text-base font-semibold">
+        Rebuild a plan from new answers <span aria-hidden="true">&rarr;</span>
+      </a>
+    {% endif %}
+  </div>
+
+  {# ---------- the unlocked plan ---------- #}
+  {% if plan %}
+    <div class="mt-9 flex items-baseline justify-between gap-3">
+      <h2 class="band-heading">{{ plan.headline }}</h2>
+      <span class="eyebrow eyebrow-moss eyebrow-chip">All 4 weeks</span>
+    </div>
+    <p class="mt-1.5 text-sm text-muted leading-relaxed">{{ plan.coach_note }}</p>
+
+    <div class="mt-5 flex flex-wrap gap-2.5">
+      <a href="/account/plan.pdf" class="inline-flex items-center gap-2 rounded-2xl border border-line bg-white px-4 py-2.5 text-sm font-semibold">Download PDF</a>
+      <a href="/account/plan.txt" class="inline-flex items-center gap-2 rounded-2xl border border-line bg-white px-4 py-2.5 text-sm font-semibold">Plain text</a>
+    </div>
+
+    <ol class="mt-6 space-y-3">
+      {% for week in weeks %}
+        <li class="rounded-3xl {% if week.number == 1 %}border border-line bg-cream/60{% else %}surface-float bg-white border border-ember/25{% endif %} p-5">
+          <div class="flex items-center gap-2">
+            <span class="font-bold">Week {{ week.number }} &middot; {{ week.label }}</span>
+            {% if week.number > 1 %}<span class="text-[11px] uppercase tracking-wide text-ember-dark">Unlocked</span>{% endif %}
+          </div>
+          <p class="mt-1.5 text-sm text-muted leading-relaxed">{{ week.arc }}</p>
+          <ul class="mt-3 space-y-1 text-sm">
+            {% for line in week.lines %}<li class="flex gap-2"><span class="text-muted shrink-0" aria-hidden="true">&middot;</span><span>{{ line }}</span></li>{% endfor %}
+          </ul>
+        </li>
+      {% endfor %}
+    </ol>
+
+    <p class="mt-5 text-xs text-muted leading-relaxed">
+      Plan reference <code class="rounded bg-cream border border-line px-1.5 py-0.5">{{ plan.profile_signature }}</code>.
+      This is the plan written from the {{ total }} answers you gave, stored at the time you
+      paid. Rebuilding from new answers makes a new plan and does not change this one.
+    </p>
+  {% else %}
+    <p class="mt-9 text-muted leading-relaxed">
+      We could not find the answers this plan was built from. Your subscription is unaffected
+      and {{ copy.trial_amount }} is still what you paid.
+      <a class="underline decoration-line underline-offset-2" href="mailto:{{ support_email }}">Tell us</a>
+      and we will rebuild it.
+    </p>
+  {% endif %}
+
+  <p class="mt-8 text-xs text-muted leading-relaxed">
+    {{ billing_note }}
+  </p>
+  {% endif %}
+</section>
+{% endblock %}

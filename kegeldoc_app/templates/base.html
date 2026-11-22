@@ -1,0 +1,118 @@
+<!doctype html>
+{#
+  Shared chrome for kegeldoc. The two rules from the routine funnel's base still hold here:
+
+  1. Footer links to Terms, Privacy and Refund on every page, so the policy is reachable from
+     checkout without any page having to remember it.
+  2. Amounts always arrive from `copy` (built from settings). No template types a price.
+
+  Two stylesheets. `kegeldoc.css` (ported from kegel_site) loads everywhere and styles the
+  chrome; the kegel-designed pages set `body_class` to `kd`, which is what its clashing class
+  names are scoped under, and drop the `extra_styles` block. The account and ops pages kept from
+  the routine funnel still use Tailwind utilities and `app.css`, recoloured to this palette.
+#}
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{% block title %}{{ brand }}{% endblock %}</title>
+<meta name="description" content="{{ copy.hero_sub | striptags | truncate(155, true) }}">
+<meta name="theme-color" content="#ffffff">
+<link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+<script>document.documentElement.classList.add('js');</script>
+<link rel="stylesheet" href="/static/kegeldoc.css">
+{% block extra_styles %}
+<link rel="stylesheet" href="/static/app.css">
+<script src="https://cdn.tailwindcss.com/3.4.16"></script>
+<script>
+  // kegeldoc palette under the routine funnel's token names, so the account and ops templates
+  // carried over unchanged pick up the new brand without a per-template edit.
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          paper: '#ffffff', cream: '#f2f8f7', line: '#dde7e5', ink: '#1d2b36', muted: '#56626b',
+          ember: { DEFAULT: '#0b6f78', dark: '#0a5e66', soft: '#e7f3f1' },
+          moss:  { DEFAULT: '#157a5a', soft: '#eaf5f0' },
+        },
+        maxWidth: { copy: '42rem' },
+      }
+    }
+  }
+</script>
+{% endblock %}
+<style>
+  details > summary { list-style: none; cursor: pointer; }
+  details > summary::-webkit-details-marker { display: none; }
+  .rehearsal { position: fixed; z-index: 70; left: 12px; right: 12px; bottom: 12px; background: var(--ink);
+    color: #fff; font-size: 12px; line-height: 17px; border-radius: 14px; padding: 12px 16px;
+    box-shadow: 0 10px 30px -10px rgba(29,43,54,.5); }
+  .rehearsal strong { display: block; margin-bottom: 2px; }
+  @media (min-width: 640px) { .rehearsal { left: auto; right: 16px; max-width: 300px; } }
+  .site-footer .links { flex-wrap: wrap; }
+</style>
+</head>
+<body class="{% block body_class %}{% endblock %}">
+
+<a href="#main" class="sr-only">Skip to content</a>
+
+{% block header %}
+<header data-section="header" class="site-header">
+  <div class="inner">
+    <a class="logo" href="/" aria-label="{{ brand }} home"><img class="logo-mark" src="/static/logo.svg" alt="" width="34" height="34"><span class="logo-word"><span>kegel<b>doc</b></span><small>sexual health</small></span></a>
+    {% block header_aside %}<a class="btn-dark" href="/onboarding">Get started</a>{% endblock %}
+  </div>
+</header>
+{% endblock %}
+
+<main id="main" class="{% block main_class %}page{% endblock %}">{% block main %}{% endblock %}</main>
+
+{% block footer %}
+<footer data-section="footer" class="site-footer">
+  <div class="row">
+    <a class="logo" href="/"><img class="logo-mark" src="/static/logo.svg" alt="" width="34" height="34"><span class="logo-word"><span>kegel<b>doc</b></span><small>sexual health</small></span></a>
+    <nav class="links" aria-label="Policies">
+      <a href="/policy/terms">Terms</a>
+      <a href="/policy/privacy">Privacy</a>
+      <a href="/policy/refund">Refund policy</a>
+      <a href="mailto:{{ support_email }}">Contact</a>
+      <a href="/health" rel="nofollow">Site checks</a>
+    </nav>
+  </div>
+  <p class="disclaimer">{{ copy.disclaimer }}</p>
+</footer>
+{% endblock %}
+
+{% if not charges_enabled %}
+{# Rehearsal banner, on every page: a visitor entering card details expecting a charge that
+   never happens is the "I never signed up" confusion the disclosure checklist exists to stop. #}
+<div role="status" class="rehearsal">
+  <strong>Rehearsal mode</strong>
+  No card is charged anywhere on this site yet, and no recurring payment exists. This funnel is being tested before it takes money.
+</div>
+{% endif %}
+
+{# Reveal-on-scroll, as in the routine funnel: one observer, each element let go after its first
+   reveal, and every failure path ends with everything visible. #}
+<script>
+(function () {
+  var items = document.querySelectorAll('.reveal');
+  if (!items.length) return;
+  function show(el) { el.classList.add('is-visible'); }
+  if (!('IntersectionObserver' in window)) { items.forEach(show); return; }
+  var entrance = Array.prototype.filter.call(items, function (el) { return el.classList.contains('reveal-quick'); });
+  requestAnimationFrame(function () { requestAnimationFrame(function () { entrance.forEach(show); }); });
+  items = Array.prototype.filter.call(items, function (el) { return !el.classList.contains('reveal-quick'); });
+  var observer = new IntersectionObserver(function (entries) {
+    entries.forEach(function (entry) {
+      if (!entry.isIntersecting) return;
+      show(entry.target);
+      observer.unobserve(entry.target);
+    });
+  }, { threshold: 0, rootMargin: '0px 0px -8% 0px' });
+  items.forEach(function (el) { observer.observe(el); });
+})();
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

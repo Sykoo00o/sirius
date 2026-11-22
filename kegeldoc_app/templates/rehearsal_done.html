@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Recorded &middot; {{ brand }}{% endblock %}
+
+{% block main %}
+{#
+  Confirmation after the rehearsal submit. Written to look like the real confirmation
+  screen, because when charges turn on this is where checklist slot 5 lives: amount
+  charged, renewal amount, renewal date, cancel link, monitored reply address. Building
+  it now, with the amounts rendered from settings rather than typed, is what makes slot 5
+  a template change later instead of a scramble.
+#}
+<section class="mx-auto max-w-copy px-4 pt-12 pb-16">
+  <div class="rounded-3xl border border-moss/30 bg-moss-soft p-6 sm:p-8">
+    <p class="w-11 h-11 rounded-full bg-moss text-white grid place-items-center text-xl font-bold" aria-hidden="true">&#10003;</p>
+    <h1 class="mt-4 text-2xl font-bold tracking-tight">Intent recorded, nothing charged</h1>
+    <p class="mt-2.5 leading-relaxed">
+      This funnel is in Phase 1 rehearsal: your checkout click was written down, your card
+      was not touched, and no subscription exists yet. What you would have seen, in the
+      words that would have been used:
+    </p>
+
+    <dl class="mt-5 space-y-2.5 text-sm bg-white rounded-2xl border border-line p-5">
+      {% for row in [
+        ('Amount charged today', copy.trial_amount),
+        ('Trial length', copy.trial_days ~ ' days'),
+        ('Renewal amount', copy.rebill_per_month ~ ', until you cancel'),
+        ('First renewal', 'About ' ~ copy.renewal_date),
+        ('Cancel', 'One click from your account page, no fee'),
+        ('Refund window on the trial charge', copy.refund_days ~ ' days, no questions'),
+        ('Reply address', support_email),
+      ] %}
+        <div class="flex flex-wrap justify-between gap-x-4 gap-y-0.5">
+          <dt class="text-muted">{{ row[0] }}</dt>
+          <dd class="font-medium text-right">{{ row[1] }}</dd>
+        </div>
+      {% endfor %}
+    </dl>
+
+    <p class="mt-5 text-sm text-muted leading-relaxed">
+      When this funnel goes live, the email it sends repeats every line above. The receipt is
+      the disclosure record, so it is generated from the same offer data as this screen
+      rather than written a second time.
+    </p>
+
+    <div class="mt-6 flex flex-wrap gap-3">
+      <a href="/preview" class="rounded-2xl bg-ink text-paper px-5 py-3 font-semibold transition hover:bg-ink/90">Back to my week 1</a>
+      <a href="/" class="rounded-2xl border border-line bg-white px-5 py-3 font-semibold transition hover:border-ember/50">Start over</a>
+    </div>
+  </div>
+</section>
+{% endblock %}

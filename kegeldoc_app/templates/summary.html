@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Your answers &middot; {{ brand }}{% endblock %}
+{% block body_class %}kd quiz-body{% endblock %}
+{% block extra_styles %}{% endblock %}
+
+{#
+  The sunk-effort checkpoint, placed between the last question and the artefact, as in the
+  routine funnel: the visitor reads every answer back in the wording they tapped, a mis-tap is
+  still free to fix, and the plan that follows demonstrably uses these inputs. Information
+  screens (study facts, the timeline) are not answers and are not listed.
+#}
+{% block main %}
+<div class="quiz-main screen-in">
+  <section class="result-head">
+    <div class="glow a" style="left:-140px;top:-120px;width:320px;height:320px" aria-hidden="true"></div>
+    <span class="eyebrow" style="position:relative">Checkpoint</span>
+    <h1>{{ total }} answers, all yours</h1>
+    <p class="muted" style="margin-top:12px;position:relative">Read them back. This is the whole input your plan is built from. Change one now if it is wrong: it is free, and it moves the plan.</p>
+  </section>
+
+  {% for group in rows %}
+    <section class="sum-group" aria-labelledby="grp-{{ group.key }}">
+      <h2 id="grp-{{ group.key }}">{{ group.title }}</h2>
+      <dl class="sum-list">
+        {% for entry in group.entries %}
+          <div>
+            <dt>{{ entry.question.title }}</dt>
+            <dd>
+              {% for label in entry.labels %}<span class="chip">{{ label }}{% if entry.question.kind == 'scale' %} of 5{% endif %}</span>{% else %}<span class="muted">Not answered</span>{% endfor %}
+              <a class="change" href="/onboarding/{{ entry.position }}">Change</a>
+            </dd>
+            {% if entry.note %}<dd class="muted" style="font-style:italic">&ldquo;{{ entry.note }}&rdquo;</dd>{% endif %}
+          </div>
+        {% endfor %}
+      </dl>
+    </section>
+  {% endfor %}
+
+  <section class="price-card" aria-labelledby="next-h">
+    <h2 id="next-h">Your week, from these answers</h2>
+    <p style="margin-top:10px;color:rgba(255,255,255,.82);font-size:15px;line-height:23px">{{ plan.summary }}</p>
+    <div style="margin-top:20px"><a class="btn-cta" href="/preview">Show my week 1 <span aria-hidden="true">&rarr;</span></a></div>
+    <small>Free to read. No card detail is asked for on the next page.</small>
+  </section>
+
+  <p class="note-small"><a href="/onboarding/0">Start again from question 1</a></p>
+</div>
+{% endblock %}

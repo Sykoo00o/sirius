@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block title %}{{ section_title }} &middot; {{ step_number }} of {{ total }} &middot; {{ brand }}{% endblock %}
+{% block body_class %}kd quiz-body{% endblock %}
+{% block extra_styles %}{% endblock %}
+{% block main_class %}{% endblock %}
+
+{#
+  One screen per page, on the reference quiz pattern (flat canvas, narrow column, tall option rows
+  that tint on hover and take the accent border when selected, 150ms, no transform), ported from
+  kegel_site/quiz.js into a real form so it works without JavaScript:
+
+  * single / scale: radio inputs in label rows. With JS, a tap auto-submits after a short beat so
+    the selection is seen; without JS, the Continue button below does the same.
+  * multi: checkboxes named after the question key. "None of these" clears the rest client-side,
+    and `quiz.parse_answer` enforces the same rule on the server.
+  * fact / milestone: an information screen acknowledged with a hidden `answer=seen`, which is how
+    resume and the forward-jump guard keep working on a flow with no question on it.
+
+  Every screen posts to its own route, so an invalid answer re-renders the page the visitor is on.
+#}
+
+{% macro art(kind) -%}
+  {%- if kind == 'relax' -%}
+  <svg viewBox="0 0 180 180" aria-hidden="true"><circle cx="90" cy="90" r="80" fill="#f2f8f7"/><path d="M30 100 Q60 60 90 100 T150 100" fill="none" stroke="#0b6f78" stroke-width="8" stroke-linecap="round"/><path d="M30 125 Q60 110 90 125 T150 125" fill="none" stroke="#9fd3cb" stroke-width="8" stroke-linecap="round"/></svg>
+  {%- else -%}
+  <svg viewBox="0 0 180 180" aria-hidden="true"><circle cx="90" cy="90" r="80" fill="#f2f8f7"/><path d="M38 70 Q90 150 142 70" fill="none" stroke="#0b6f78" stroke-width="12" stroke-linecap="round"/><path d="M52 66 Q90 128 128 66" fill="none" stroke="#9fd3cb" stroke-width="6" stroke-linecap="round"/><circle cx="90" cy="62" r="16" fill="#e8735a" opacity=".85"/></svg>
+  {%- endif -%}
+{%- endmacro %}
+
+{% block header %}
+<div class="quiz-top">
+  <div class="inner">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <a class="logo" href="/"><img class="logo-mark" src="/static/logo.svg" alt="" width="34" height="34"><span class="logo-word"><span>kegel<b>doc</b></span><small>sexual health</small></span></a>
+      <span class="muted" style="font-size:13px;font-weight:600">{{ section_title }}</span>
+    </div>
+    <div class="bar-row">
+      <a class="icon-btn" href="{{ '/onboarding/%d' % (step - 1) if step > 0 else '/' }}" aria-label="{{ 'Previous question' if step > 0 else 'Back to the home page' }}">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+      </a>
+      <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ progress }}" aria-label="Quiz progress"><i style="width:{{ progress }}%"></i></div>
+      <span class="step-count">{{ step_number }}/{{ total }}</span>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block main %}
+<div class="quiz-main">
+  <form method="post" action="/onboarding/{{ step }}" id="quiz-form" class="screen-in" data-kind="{{ question.kind }}" data-exclusive="{{ question.exclusive }}">
+
+  {% if errors %}
+    <div role="alert" class="quiz-error">{% for error in errors %}<p>{{ error }}</p>{% endfor %}</div>
+  {% endif %}
+
+  {% if question.kind == 'fact' %}
+    <div class="fact">
+      <div class="art">{{ art(question.art) }}</div>
+      <span class="eyebrow">{{ question.eyebrow }}</span>
+      <h1 class="fact-title">{{ question.title }}</h1>
+      <p>{{ question.body }}</p>
+      {% if question.source %}<p class="src"><b>Source:</b> {{ question.source }}</p>{% endif %}
+    </div>
+    <input type="hidden" name="answer" value="seen">
+    <div class="quiz-cta"><button class="btn-cta" type="submit">Got it <span aria-hidden="true">&rarr;</span></button></div>
+
+  {% elif question.kind == 'milestone' %}
+    <div class="fact milestone">
+      <span class="eyebrow">Your plan so far</span>
+      <h1 class="fact-title">A 4-week plan for <span class="grad-text">{{ milestone.focus | lower }}</span></h1>
+      <ol class="timeline">
+        {% for when, what in milestone.steps %}<li><b>{{ when }}</b><span>{{ what }}</span></li>{% endfor %}
+      </ol>
+      <dl class="kv">
+        <div><dt>Each day</dt><dd>3–10 min</dd></div><div><dt>Equipment</dt><dd>None</dd></div>
+        <div><dt>Where</dt><dd>Anywhere</dd></div><div><dt>Who can tell</dt><dd>Nobody</dd></div>
+      </dl>
+      <p class="src">These are plan dates, not a promised result. Progress varies from person to person.</p>
+    </div>
+    <input type="hidden" name="answer" value="seen">
+    <div class="quiz-cta"><button class="btn-cta" type="submit">Continue <span aria-hidden="true">&rarr;</span></button></div>
+
+  {% else %}
+    <h1 class="q-title">{{ question.title }}</h1>
+    {% if question.help %}<p class="q-help">{{ question.help }}</p>{% endif %}
+
+    {% if question.kind == 'scale' %}
+      <fieldset class="scale-set">
+        <legend class="sr-only">{{ question.title }}</legend>
+        <div class="scale">
+          {% for value in question.option_values %}
+            <label class="option" for="opt-{{ value }}">
+              <input type="radio" name="answer" id="opt-{{ value }}" value="{{ value }}" data-autosubmit="true" {% if value in answered %}checked{% endif %}>
+              <span>{{ value }}</span>
+            </label>
+          {% endfor %}
+        </div>
+        <div class="scale-ends"><span>{{ question.low }}</span><span>{{ question.high }}</span></div>
+      </fieldset>
+
+    {% else %}
+      <fieldset class="options">
+        <legend class="sr-only">{{ question.title }}</legend>
+        {% for value, label in question.options %}
+          <label class="option{% if question.icons %} tall{% endif %}" for="opt-{{ value }}">
+            <input type="{{ 'checkbox' if question.kind == 'multi' else 'radio' }}"
+                   name="{{ question.key if question.kind == 'multi' else 'answer' }}"
+                   id="opt-{{ value }}" value="{{ value }}"
+                   data-autosubmit="{{ 'false' if question.kind == 'multi' else 'true' }}"
+                   {% if value in answered %}checked{% endif %}>
+            {% if question.icons %}
+              <span class="ico" aria-hidden="true">
+                {% if value == 'men' %}<svg viewBox="0 0 48 48" fill="none"><circle cx="24" cy="16" r="8" fill="#0b6f78"/><path d="M10 42c0-8 6-14 14-14s14 6 14 14" fill="#9fd3cb"/></svg>
+                {% else %}<svg viewBox="0 0 48 48" fill="none"><circle cx="24" cy="16" r="8" fill="#157a5a"/><path d="M16 13c0-6 4-9 8-9s8 3 8 9v6h-3v-6M19 19v-6" stroke="#157a5a" stroke-width="2"/><path d="M8 42l6-12c2-2 6-3 10-3s8 1 10 3l6 12z" fill="#f3c2b5"/></svg>{% endif %}
+              </span>
+            {% endif %}
+            <span>{{ label }}{% if question.subs.get(value) %}<span class="sub">{{ question.subs[value] }}</span>{% endif %}</span>
+            {% if question.kind == 'multi' %}<span class="box" aria-hidden="true"></span>{% endif %}
+          </label>
+        {% endfor %}
+      </fieldset>
+    {% endif %}
+
+    {% if question.allow_note %}
+      <div class="note-field">
+        <label for="note">Anything else that shapes your routine? <span class="muted">(optional)</span></label>
+        <textarea name="note" id="note" maxlength="280" rows="3" placeholder="Shift work, a long commute, a new baby">{{ saved_note }}</textarea>
+      </div>
+    {% endif %}
+
+    <div class="quiz-cta {% if question.kind != 'multi' and not question.allow_note %}autosubmit-cta{% endif %}">
+      <button class="btn-cta" type="submit">
+        {{ 'See my summary' if step_number == total else 'Continue' }} <span aria-hidden="true">&rarr;</span>
+      </button>
+    </div>
+  {% endif %}
+  </form>
+
+  <p class="note-small">Your answers save as you go. Nothing is charged, and no account is needed to see week 1.</p>
+</div>
+{% endblock %}
+
+{% block footer %}{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var form = document.getElementById('quiz-form');
+  if (!form) return;
+  var noteless = !document.getElementById('note');
+  // Single and scale: submit on tap after a beat, so the selected colour is seen before the page
+  // changes; without the beat a tap reads as dropped and invites a second one. One submit only.
+  var submitted = false;
+  form.querySelectorAll('input[data-autosubmit="true"]').forEach(function (input) {
+    input.addEventListener('change', function () {
+      if (submitted || !noteless) return;
+      submitted = true;
+      setTimeout(function () { form.requestSubmit ? form.requestSubmit() : form.submit(); }, 260);
+    });
+  });
+  // Multi: the exclusive option ("None of these") clears the others, and any other clears it.
+  var exclusive = form.dataset.exclusive;
+  if (form.dataset.kind === 'multi' && exclusive) {
+    var boxes = form.querySelectorAll('input[type="checkbox"]');
+    boxes.forEach(function (box) {
+      box.addEventListener('change', function () {
+        if (!box.checked) return;
+        boxes.forEach(function (other) {
+          if (other === box) return;
+          if (box.value === exclusive || other.value === exclusive) other.checked = false;
+        });
+      });
+    });
+  }
+})();
+</script>
+{% endblock %}

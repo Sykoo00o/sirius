@@ -1,0 +1,417 @@
+/* Tailwind carries the layout. This file holds what a utility pass cannot express
+   portably: the print stylesheet, the reduced-motion path, and (since the UI polish
+   pass, `UI_POLISH_PLAN.md` step 1) the shared surface and motion vocabulary every page
+   draws from, so a shadow or an easing curve is defined once and never retyped.
+
+   Print matters commercially, not cosmetically. Export is a paid feature, and a visitor
+   who prints or saves the free week 1 as PDF is someone who found the artefact useful,
+   which is the signal the trial is priced on. */
+
+/* ---------------------------------------------------------------------------
+   Tokens
+   --------------------------------------------------------------------------- */
+
+:root {
+  /* Five stacked low-alpha shadows: depth that reads on any background, which a solid
+     border cannot do. Tinted warm so it sits on paper rather than looking grey. */
+  --shadow-float:
+    0 1px 2px rgba(29, 43, 54, 0.04),
+    0 4px 10px rgba(29, 43, 54, 0.04),
+    0 14px 24px rgba(29, 43, 54, 0.05),
+    0 32px 40px rgba(29, 43, 54, 0.04),
+    0 56px 64px rgba(29, 43, 54, 0.02);
+  --shadow-hairline: 0 1px 0 rgba(29, 43, 54, 0.06);
+  --shadow-cta:
+    0 4px 12px rgba(232, 89, 12, 0.28),
+    0 2px 6px rgba(29, 43, 54, 0.10),
+    inset 0 0 16px rgba(255, 255, 255, 0.22);
+  --shadow-cta-hover:
+    0 10px 26px rgba(232, 89, 12, 0.36),
+    0 4px 14px rgba(29, 43, 54, 0.12),
+    inset 0 0 20px rgba(255, 255, 255, 0.30);
+
+  /* Fast start, long settle: reads as responsive without a bounce. */
+  --ease-out-soft: cubic-bezier(0.2, 0, 0, 1);
+
+  /* One accent gradient, used for a single phrase per page and nowhere else.
+     Decorative display text at 38px+, where WCAG's large-text threshold is 3:1. The middle stop
+     is #137565 rather than the brighter #2a9d8f it replaced because that stop measured 2.26:1
+     against a tinted band, under the large-text floor as well; #137565 measures 3.13:1 there.
+     Do not extend this gradient to a place that carries small text. */
+  --grad-accent: linear-gradient(90deg, #0b6f78 0%, #137565 48%, #157a5a 100%);
+
+  /* Band rhythm. Taken from the reference capture (`capture/plan.md`): the site reads as
+     tall tinted panels separated by generous air rather than as a column of sections.
+     Measured 152px vertical on desktop; scaled down for a 42rem funnel column. */
+  --band-pad-mobile: 56px;
+  --band-pad-desktop: 96px;
+  --band-radius-mobile: 24px;
+  --band-radius-desktop: 40px;
+  /* The CTA fill, and the reason it is flat.
+
+     This was a two-stop ember-to-amber sweep, and a white label on it measured 3.7:1 against
+     the amber end, where the labels are 16px semibold in the quiz and the summary and need 4.5:1
+     (`capture/audit.js` finds this by resolving what is actually painted, including gradients,
+     which a palette-token test cannot see). Darkening the amber end to keep the sweep leaves the
+     button the colour of a warning sign, so the fill is a flat brand ember instead: #0b6f78
+     puts white at 4.53:1 at every pixel, including the hover state.
+
+     A gradient is affordable where the text is large (the 3:1 threshold) or where it carries no
+     text at all. That is `--grad-accent` above, on a 38px headline. */
+  --grad-cta: #0b6f78;
+  --grad-cta-hover: #0a5e66;
+
+  /* Non-text brand accents at their own, lighter value. Contrast rules bind text; a 6px bullet
+     is not text and reading it does not depend on a ratio, so it keeps the brighter ember that
+     the text colours had to give up. Named so the choice is visible: without a token the mid
+     tone gets retyped as a hex at each call site and quietly drifts back into text usage. */
+  --ember-bright: #1b8a8f;
+  --ember-brighter: #2a9d8f;
+}
+
+/* ---------------------------------------------------------------------------
+   Surfaces
+   --------------------------------------------------------------------------- */
+
+/* Big rounded section panel. 24px on phones, 40px from `sm`: the copy column is narrow,
+   so the reference's 80px would read as a pill rather than a page. */
+.panel {
+  border-radius: 24px;
+  box-shadow: var(--shadow-float);
+}
+@media (min-width: 640px) {
+  .panel { border-radius: 40px; }
+}
+
+/* Tinted section band, inset from the viewport edge with the reference's air around it.
+   A band carries a whole argument, which is why the padding is large: 56px of interior
+   space on a phone, 96px on a desktop. Applied via a class rather than utilities because
+   the radius, the padding step and the tint have to change together, and three separate
+   breakpoint prefixes retyped per section is how one band ends up out of step with the rest. */
+.band {
+  border-radius: var(--band-radius-mobile);
+  padding: var(--band-pad-mobile) 20px;
+}
+@media (min-width: 640px) {
+  .band {
+    border-radius: var(--band-radius-desktop);
+    padding: var(--band-pad-desktop) 40px;
+  }
+}
+.band-tint { background: #f2f8f7; }        /* warm counterpart of the reference's tinted bands */
+.band-deep { background: #eef5f3; }
+.band-panel { background: #ffffff; }
+
+/* Eyebrow label: a filled pill rather than a small-caps kicker. Measured on the reference as
+   a 999px-radius pill with a 10% tint of the accent behind it, 12px/16px padding.
+
+   The pill carries its own background *and* is a flex container for a possible leading icon,
+   and both of those are author-normal properties that a utility class also sets. Tailwind
+   ships in a stylesheet loaded *before* this file, so its `inline`/`flex`/`bg-*` utilities lose
+   on cascade order, not specificity: `px-3 text-xs` on this element would silently strip the
+   pill's padding. So anything an element might need to override goes into the modifier
+   variants below rather than expecting a utility to win. If a utility ever has to win, write it
+   into `tailwind.config` as a theme value instead of fighting the cascade per call site. */
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  letter-spacing: -0.1px;
+  background: #e7f3f1;
+  color: #0a5e66;
+}
+.eyebrow-moss { background: #eaf5f0; color: #145f48; }
+/* Compact variant for a state chip sitting on a heading row, where the full pill would
+   outweigh the heading it labels. A variant rather than `!py-1 !px-3 !text-xs` at the call
+   site, because three important-flagged utilities per chip is how the rhythm gets retyped
+   out of sync across six pages. */
+.eyebrow-chip { padding: 4px 10px; font-size: 12px; line-height: 16px; }
+.eyebrow-neutral { background: #eef1f1; color: #56626b; }
+/* Card title that keeps the eyebrow's role without its pill. The reference sets feature-card
+   headings at 36px inside a dark panel, which does not translate to a 300px-wide card listing
+   six items, so ours stay text. `background: none` is the operative declaration: `.eyebrow`
+   sets a background, and this rule exists so the pill can be dropped without dropping the
+   type scale and letter-spacing with it. */
+.eyebrow-title {
+  background: none;
+  padding: 0;
+  color: #56626b;
+  font-size: 13px;
+  line-height: 18px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+.eyebrow-title-moss { color: #145f48; }
+@media (min-width: 640px) {
+  .eyebrow { padding: 10px 18px; font-size: 14px; line-height: 20px; }
+}
+
+/* Headline scale from the capture: 72px/80px at −4px tracking, weight 500, centred, on a
+   600px measure. Kept at 600 rather than 500 because Inter at a display size thins out on
+   subpixel-rendered screens, and this funnel's headline carries the value proposition. */
+.display {
+  font-size: 38px;
+  line-height: 42px;
+  letter-spacing: -1.4px;
+  font-weight: 600;
+  text-wrap: balance;
+}
+@media (min-width: 640px) {
+  .display { font-size: 56px; line-height: 60px; letter-spacing: -2.6px; }
+}
+@media (min-width: 1024px) {
+  .display { font-size: 68px; line-height: 72px; letter-spacing: -3.4px; }
+}
+/* Band heading: the reference's 36px/40px/−1.2px, one step below the display size. */
+.band-heading {
+  font-size: 28px;
+  line-height: 32px;
+  letter-spacing: -0.9px;
+  font-weight: 600;
+  text-wrap: balance;
+}
+@media (min-width: 640px) {
+  .band-heading { font-size: 36px; line-height: 40px; letter-spacing: -1.2px; }
+}
+
+/* ---------------------------------------------------------------------------
+   Quiz option row
+   --------------------------------------------------------------------------- */
+
+/* The reference's option pattern, measured in `capture/quiz.states.json`: borderless white
+   row, 16px radius, an 8px gap between rows, hover moves the fill to a tint, selection adds
+   the accent border, and all of it on `background, border-color` at 0.15s ease with no
+   transform. Border is drawn at 2px in the resting state and simply recoloured to transparent,
+   so selecting one row never shifts the rows under it: the alternative (adding a border on
+   select) moves every option the visitor is about to tap. */
+.option {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  /* 64px content box, so a row is 96px tall with the 16px vertical padding, matching the
+     height measured on the reference option row. A quiz option is the primary input for
+     several minutes of the funnel's life and it is tapped on a phone with a thumb, so the
+     target is sized rather than left to the text. */
+  min-height: 64px;
+  border: 2px solid transparent;
+  border-radius: 16px;
+  background: #ffffff;
+  padding: 16px 18px;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(29, 43, 54, 0.05);
+  transition-property: background-color, border-color, box-shadow;
+  transition-duration: 150ms;
+  transition-timing-function: ease;
+  -webkit-tap-highlight-color: transparent;
+}
+@media (min-width: 640px) { .option { padding: 20px 22px; } }
+@media (hover: hover) {
+  .option:hover { background: #e7f3f1; box-shadow: 0 4px 14px rgba(29, 43, 54, 0.07); }
+}
+.option:has(input:checked) {
+  border-color: #0b6f78;
+  background: #e7f3f1;
+  box-shadow: 0 2px 8px rgba(232, 89, 12, 0.12);
+}
+.option:has(input:focus-visible) { outline: 3px solid #0b6f78; outline-offset: 3px; }
+.option:active { background: #d9ecea; }
+/* The label is the tap target, so the row's own typography is what a visitor reads:
+   16px/20px/600 in the capture. */
+.option-label { font-size: 16px; line-height: 22px; font-weight: 600; letter-spacing: -0.2px; }
+.option-help { font-size: 13px; line-height: 18px; font-weight: 400; color: #56626b; }
+
+/* Card lifted by shadow rather than outlined. */
+.surface-float { box-shadow: var(--shadow-float); }
+
+/* Gradient-clipped text for one accent phrase. `color` stays set as the fallback, so a
+   browser without background-clip still renders legible ember text, never transparent. */
+.text-gradient {
+  color: #0b6f78;
+  background-image: var(--grad-accent);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .text-gradient { -webkit-text-fill-color: transparent; }
+}
+
+/* ---------------------------------------------------------------------------
+   Primary button
+   --------------------------------------------------------------------------- */
+
+/* Gradient body plus a 3px darker lip on the bottom edge, so the button looks pressable
+   before it is touched. Hover lifts 2px; press flattens and shrinks to 0.96. Transitions
+   name their properties: `transition: all` would also animate layout and colour changes
+   nobody asked for. */
+.btn-primary {
+  position: relative;
+  isolation: isolate;   /* own stacking context, so the hover layer can sit at z -1 */
+  border-radius: 999px;  /* pill, as the reference: measured radius 99px on every CTA */
+  color: #fff;
+  background: var(--grad-cta);
+  border-bottom: 3px solid rgba(160, 58, 6, 0.45);
+  box-shadow: var(--shadow-cta);
+  transition-property: transform, box-shadow, background-color, border-color;
+  transition-duration: 200ms;
+  transition-timing-function: var(--ease-out-soft);
+  -webkit-tap-highlight-color: transparent;
+}
+.btn-primary::before {
+  /* Hover gradient on its own layer and cross-faded by opacity, because gradients
+     themselves cannot be transitioned. */
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--grad-cta-hover);
+  opacity: 0;
+  transition: opacity 200ms var(--ease-out-soft);
+  pointer-events: none;
+  /* Behind the label, above the button's own background. A positioned layer at the
+     default z would paint over bare text nodes ("Start my trial for $2.99"), which are
+     not elements and cannot be lifted above it. */
+  z-index: -1;
+}
+@media (hover: hover) {
+  .btn-primary:hover { transform: translateY(-2px); box-shadow: var(--shadow-cta-hover); }
+  .btn-primary:hover::before { opacity: 1; }
+}
+.btn-primary:active {
+  transform: translateY(0) scale(0.96);
+  border-bottom-color: transparent;
+  box-shadow: 0 2px 6px rgba(232, 89, 12, 0.22);
+  transition-duration: 90ms;
+}
+.btn-primary:focus-visible { outline: 3px solid #0b6f78; outline-offset: 3px; }
+
+/* ---------------------------------------------------------------------------
+   Scroll reveal
+   --------------------------------------------------------------------------- */
+
+/* Gated on `html.js`, which `base.html` sets inline before first paint. Without JS, or
+   when the observer never fires, nothing is ever hidden: a reveal is decoration, and the
+   funnel's disclosures must not depend on decoration. Never put `.reveal` on an element
+   that carries a disclosure line, a price, or the rehearsal banner. */
+html.js .reveal {
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity 450ms var(--ease-out-soft),
+    transform 450ms var(--ease-out-soft);
+  transition-delay: calc(var(--i, 0) * 80ms);
+}
+html.js .reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+/* Stagger helper: children of `.stagger` that are also `.reveal` pick up their delay
+   from `--i`. Set `--i` inline (`style="--i: 2"`) or via `loop.index0` in Jinja. */
+.stagger > .reveal { transition-delay: calc(var(--i, 0) * 80ms); }
+
+/* Quick variant for pages that are themselves a sequence (the twelve quiz steps). Every
+   step is a full page load, so the entrance replays twelve times: 200ms, 4px, 50ms
+   apart keeps three staggered parts inside ~300ms, under the threshold where it starts
+   reading as a slow page rather than a finished one. */
+html.js .reveal.reveal-quick {
+  transform: translateY(4px);
+  transition-duration: 200ms;
+  transition-delay: calc(var(--i, 0) * 50ms);
+}
+html.js .reveal.reveal-quick.is-visible { transform: none; }
+
+/* ---------------------------------------------------------------------------
+   Reduced motion
+   --------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: no-preference) {
+  details[open] > div { animation: reveal 140ms ease-out; }
+}
+
+/* Disclosure caret on `<details>` cards: rotates rather than swapping glyphs, so open and
+   close read as one control changing state. */
+.caret { display: inline-block; transition: transform 200ms var(--ease-out-soft); }
+details[open] .caret { transform: rotate(180deg); }
+
+@keyframes reveal {
+  from { opacity: 0; transform: translateY(-2px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Reduced motion, and it is a policy with two halves, not one switch.
+   `animation: none` on everything is safe: an animation either completes or does not, and
+   cancelling it leaves the element in its normal state. `transition: none` on everything is
+   also fine *provided* no element's resting appearance depends on a transition having run.
+   `.reveal` does exactly depend on that (it sits at opacity 0 until a class lands), so it is
+   pinned visible here, and `base.html` deliberately does not carry a blanket `* { transition:
+   none }` rule that would have cancelled the reveal on the way to cancelling decoration.
+   State changes (option selected, CTA pressed) lose their easing, which is the point. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  html.js .reveal { opacity: 1 !important; transform: none !important; }
+  .btn-primary:hover, .btn-primary:active { transform: none; }
+}
+
+/* ---------------------------------------------------------------------------
+   Print
+   --------------------------------------------------------------------------- */
+
+@media print {
+  header, footer, [role="status"], details > summary::after, .no-print { display: none !important; }
+  details > div { display: block !important; }   /* expanded or not, print shows everything */
+  body { background: #fff; color: #000; }
+  main { max-width: none; }
+  a[href^="http"]::after { content: ""; }        /* no URL spam on a printed plan */
+  html.js .reveal { opacity: 1 !important; transform: none !important; }
+  .panel, .surface-float { box-shadow: none; border: 1px solid #ccc; }
+  .text-gradient { -webkit-text-fill-color: currentColor; background: none; color: #000; }
+}
+
+/* Locked content stays readable. The lock is honest about *what* is missing, so it is
+   typeset as information rather than as a teaser you cannot read. */
+.locked-card { }
+
+/* ---------------------------------------------------------------------------
+   Quiz as a full-height panel
+   --------------------------------------------------------------------------- */
+
+/* The reference quiz is a flat viewport-height surface with a 350px content column, no
+   header, no footer and no card behind the question: the question *is* the page, which is
+   what stops a twelve-step quiz from feeling like a website you are scrolling. Adopted,
+   with our warm paper instead of their cool grey, and with the progress bar kept (they show
+   a percentage only on their loading screen; for a sunk-effort funnel the bar is the
+   retention mechanic, so dropping it would be copying a weakness).
+   `min-height` rather than `height` because a multi-select step with eleven options and a
+   textarea is taller than a phone screen, and clipping it would be worse than scrolling. */
+.quiz-shell {
+  min-height: calc(100vh - 3.5rem);
+  background: #f2f8f7;
+}
+.quiz-column { max-width: 30rem; margin-inline: auto; }
+
+/* Sticky progress strip. `px-5` on the shell and `-mx-5` on the strip are two spellings of the
+   same gutter: a `tailwind.config` scale value (so `max-w-quiz-gutter` and `-mx-quiz-gutter`
+   are the same token) would be the better form, and is the one to reach for if this gutter
+   spreads. It stays a literal here because the shell's padding is already 20px in this file
+   (`.quiz-shell` inherits it from the band gutter) and separating one pair would imply a
+   system that does not exist yet. */
+.quiz-progress {
+  position: sticky;
+  top: -3.5rem;      /* the shared header is sticky at 0 and 56px tall: this tucks under it */
+  z-index: 20;
+  margin-inline: -20px;
+  padding: 16px 20px;
+  background: rgba(247, 242, 233, 0.95);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid #dde7e5;
+}

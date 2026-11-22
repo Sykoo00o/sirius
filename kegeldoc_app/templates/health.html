@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% block title %}Site checks &middot; {{ brand }}{% endblock %}
+
+{% block main %}
+{#
+  Ops screen, not a marketing surface. It answers one question and answers it in the open:
+  is this copy allowed to face a stranger?
+
+  That is a status, not a build artifact, so it belongs on a page rather than only in a
+  test suite you have to remember to run before pointing traffic at a funnel.
+#}
+<section class="mx-auto max-w-copy px-4 pt-8 pb-16">
+  <h1 class="text-2xl font-bold tracking-tight">Site checks</h1>
+  <p class="mt-1.5 text-sm text-muted">Guardrail state as of {{ today }}. Not linked from any funnel page.</p>
+
+  <div class="mt-6 space-y-5">
+
+    <section class="rounded-2xl border border-line bg-white p-5">
+      <h2 class="font-semibold flex items-center gap-2">
+        {% if violations %}<span class="text-ember-dark">&#9888;</span> Copy guardrail: {{ violations | length }} flagged{% else %}<span class="text-moss">&#10003;</span> Copy guardrail: clean{% endif %}
+      </h2>
+      {# Deliberately not written as prose. This page explains the rule, and the words the
+         rule bans are the words that explain it, so the explanation is carried by a Jinja
+         comment and rendered from the vocabulary itself. Writing the sentence as body copy
+         would mean one of two bad options: exempt this page from the scan, or keep this page
+         permanently on the exempted-lines whitelist. Neither is a rule, and the scan is worth
+         more when it has no exceptions. #}
+      <p class="mt-1 text-sm text-muted leading-relaxed">
+        Every rendered string is scanned against the forbidden vocabulary:
+        {{ scan_terms_preview }}. Exemption is granted only to whole disclaimer lines, never
+        to a forgiven word, so a negation cannot shelter a claim standing next to it.
+      </p>
+      {% if violations %}
+        <ul class="mt-3 space-y-2 text-sm">
+          {% for term, snippet in violations %}
+            <li class="rounded-lg bg-ember-soft border border-ember/30 px-3 py-2">
+              <span class="font-semibold">{{ term }}</span>
+              <span class="block text-muted text-xs mt-0.5">&hellip;{{ snippet }}&hellip;</span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    </section>
+
+    <section class="rounded-2xl border border-line bg-white p-5">
+      <h2 class="font-semibold">Required disclosures</h2>
+      <p class="mt-1 text-sm text-muted">The four mandated sentences, and whether this build emits them.</p>
+      <ul class="mt-3 space-y-2 text-sm">
+        {% for slot, present, expected in coverage %}
+          <li class="flex gap-2">
+            <span class="{% if present %}text-moss{% else %}text-ember-dark{% endif %} shrink-0">{{ '&#10003;' if present else '&#10007;' }}</span>
+            <span><span class="font-medium">{{ slot }}</span><span class="block text-muted text-xs mt-0.5">{{ expected }}</span></span>
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <section class="rounded-2xl border border-line bg-white p-5">
+      <h2 class="font-semibold">Artefact render self-check</h2>
+      <p class="mt-1 text-sm text-muted">
+        The preview page built offline from a fixed answer set and searched for its own
+        content. A blank artefact still returns HTTP 200, so a status code cannot catch it.
+      </p>
+      <p class="mt-3 text-sm">
+        <span class="{% if artefact.ok %}text-moss{% else %}text-ember-dark{% endif %} font-semibold">
+          {{ '&#10003;' if artefact.ok else '&#10007;' }}
+          {{ "All " ~ artefact.checks_run ~ " artefact checks present" if artefact.ok else "Artefact is incomplete" }}
+        </span>
+      </p>
+      {% if artefact.problems %}
+        <ul class="mt-2 space-y-1 text-sm">
+          {% for problem in artefact.problems %}
+            <li class="rounded-lg bg-ember-soft border border-ember/30 px-3 py-2">{{ problem }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+      <p class="mt-2 text-xs text-muted">
+        Plan-table audit (every goal reaches a drill, levels rest at least as long as they hold, pain gives a relax-first plan):
+        {% if meal_audit %}<span class="text-ember-dark font-semibold">{{ meal_audit | length }} problem(s): {{ meal_audit | join('; ') }}</span>{% else %}clean{% endif %}
+      </p>
+    </section>
+
+    <section class="rounded-2xl border border-line bg-white p-5">
+      <h2 class="font-semibold">Offer and mode</h2>
+      <dl class="mt-3 text-sm space-y-1.5">
+        <div class="flex justify-between gap-4"><dt class="text-muted">Trial</dt><dd>{{ copy.trial_amount }} for {{ copy.trial_days }} days</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-muted">Recurring</dt><dd>{{ copy.rebill_per_month }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-muted">Refund window</dt><dd>{{ copy.refund_days }} days</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-muted">Charges</dt><dd>{{ "ENABLED" if charges_enabled else "off, rehearsal" }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-muted">Preview generation</dt><dd>{{ "fast-tier LLM with deterministic fallback" if copy.settings.preview_mode == 'llm' else "deterministic builder only" }}</dd></div>
+      </dl>
+    </section>
+
+    <section class="rounded-2xl border border-line bg-white p-5" data-section="billing-checks">
+      <h2 class="font-semibold flex items-center gap-2">
+        {% if billing_issues %}<span class="text-ember-dark">&#9888;</span> Billing readiness: {{ billing_issues | length }} to settle{% else %}<span class="text-moss">&#10003;</span> Billing readiness: clean{% endif %}
+      </h2>
+      <p class="mt-1 text-sm text-muted leading-relaxed">
+        Merchant isolation is the rule this section defends: lane C charges only on the
+        <strong>funnel</strong> keys, so a dispute ratio here cannot reach the B2B account.
+        Money moves only when the charge switch is on <em>and</em> a funnel secret key exists.
+      </p>
+      {# "unsigned posts accepted" is the state `§2.4` warns about, spelled out in the page
+         rather than in a footnote: while no automated action hangs off the webhook it is a
+         gap, and the moment one does it becomes a hole someone can post through. #}
+      {% if billing_issues %}
+        <ul class="mt-3 space-y-2 text-sm">
+          {% for issue in billing_issues %}
+            <li class="rounded-lg bg-ember-soft border border-ember/30 px-3 py-2">{{ issue }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+      <dl class="mt-3 text-sm space-y-1.5">
+        <div class="flex justify-between gap-4"><dt class="text-muted">Charge switch</dt><dd>{{ "on" if billing.charges_enabled else "off" }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-muted">Will take a card</dt><dd>{{ "yes" if billing.client_active else "no" }}</dd></div>
+        {% if billing.rehearsal_reason %}
+          <div class="flex justify-between gap-4"><dt class="text-muted">Why not</dt><dd class="text-right">{{ billing.rehearsal_reason }}</dd></div>
+        {% endif %}
+        {# The variable name spelled out on the line that reports it, so an operator reading a
+           red issue and an operator reading this table are looking at the same string. The
+           readiness issues name env vars; a table that says only "key present: no" makes them
+           guess which of the three. #}
+        <div class="flex justify-between gap-4"><dt class="text-muted">STRIPE_SECRET_KEY_FUNNEL</dt><dd>{{ "present" if billing.key_present else "unset" }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-muted">Key / account type</dt><dd>{{ billing.key_type or "-" }} / {{ billing.acct_type or "-" }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-muted">Webhook secret</dt><dd>{{ "set" if billing.webhook_secret_present else "UNSET, unsigned posts accepted" }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-muted">Mail transport</dt><dd>{{ billing.mail_transport }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-muted">Save-offer options live</dt><dd>{{ billing.offer_options | join(", ") or "none beyond stay-cancelled" }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-muted">Discount coupon</dt><dd>{{ "configured" if billing.discount_coupon_configured else "unset, so option C is hidden" }}</dd></div>
+      </dl>
+      {% if billing.processor is defined %}
+        <pre class="mt-3 text-xs bg-cream border border-line rounded-xl p-3 overflow-x-auto">{{ billing.processor | tojson(indent=2) }}</pre>
+      {% endif %}
+      {% if billing.counts or billing.offer_counts %}
+        <h3 class="mt-4 text-xs uppercase tracking-wide text-muted">Subscriptions by state</h3>
+        <dl class="mt-1.5 grid grid-cols-2 sm:grid-cols-3 gap-2 text-center text-sm">
+          {% for state, count in billing.counts.items() %}
+            <div class="rounded-xl bg-cream border border-line px-2 py-2.5">
+              <dt class="text-[11px] uppercase tracking-wide text-muted">{{ state }}</dt>
+              <dd class="mt-0.5 font-bold tabular-nums">{{ count }}</dd>
+            </div>
+          {% endfor %}
+        </dl>
+        <h3 class="mt-4 text-xs uppercase tracking-wide text-muted">Save-offer outcomes</h3>
+        <dl class="mt-1.5 grid grid-cols-2 sm:grid-cols-3 gap-2 text-center text-sm">
+          {% for event, count in billing.offer_counts.items() %}
+            <div class="rounded-xl bg-cream border border-line px-2 py-2.5">
+              <dt class="text-[11px] uppercase tracking-wide text-muted">{{ event }}</dt>
+              <dd class="mt-0.5 font-bold tabular-nums">{{ count }}</dd>
+            </div>
+          {% endfor %}
+        </dl>
+      {% endif %}
+    </section>
+
+    <section class="rounded-2xl border border-line bg-white p-5">
+      <h2 class="font-semibold">Model routing</h2>
+      {% if router_available %}
+        <p class="mt-1 text-sm text-muted">Loaded from <code>backend/llm_router.py</code>. The deterministic builder is the fallback, so an outage costs tone and not the artefact.</p>
+        <pre class="mt-3 text-xs bg-cream border border-line rounded-xl p-3 overflow-x-auto">{{ routing | tojson(indent=2) }}</pre>
+      {% else %}
+        <p class="mt-1 text-sm text-muted">Router not loaded: every preview is generated by the deterministic builder, which is a supported state, not a failure.</p>
+      {% endif %}
+      {% if secret_ephemeral %}
+        <p class="mt-3 text-sm rounded-lg bg-ember-soft border border-ember/30 px-3 py-2">
+          <strong>FUNNEL_SESSION_SECRET is unset.</strong> Quiz progress does not survive a restart. Set it before any traffic.
+        </p>
+      {% endif %}
+    </section>
+
+    <section class="rounded-2xl border border-line bg-white p-5">
+      <h2 class="font-semibold">Captured events</h2>
+      <p class="mt-1 text-sm text-muted">Distinct visitors per stage, from <code>{{ db_path }}</code>. Rates are computed, never stored.</p>
+      <dl class="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-sm">
+        {% for stage, label in [('started', 'Quiz'), ('previewed', 'Previewed'), ('checkout_viewed', 'Checkout'), ('paid', 'Paid')] %}
+          <div class="rounded-xl bg-cream border border-line px-2 py-3">
+            <dt class="text-[11px] uppercase tracking-wide text-muted">{{ label }}</dt>
+            <dd class="mt-0.5 font-bold tabular-nums">{{ counts.get(stage, 0) }}</dd>
+          </div>
+        {% endfor %}
+      </dl>
+      <p class="mt-3 text-xs"><a class="underline decoration-line underline-offset-2" href="/dev/responses">Inspect recent rows</a></p>
+    </section>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Checkout &middot; {{ brand }}{% endblock %}
+
+{% block main %}
+{#
+  Checkout, live mode: a card will be charged. Two rules this page cannot break.
+
+  1. The mandated disclosure sits *inside* the form element, immediately above the payment
+     button, so it cannot be scrolled away from the button on any screen width. Not a modal,
+     not a tooltip, not a link that happens to be nearby (checklist 1).
+  2. There is no card field on this page to label, because the card is collected on Stripe's
+     hosted page. Checklist 2 asks that the card field name the recurring amount, and that
+     obligation moves to the processor's own checkout, where the recurring line item is priced
+     and labelled (see `stripe_billing.create_checkout_session`). The disclosure that must live
+     on *our* page is the renewal date, which is why it is in the block above the button
+     rather than in the summary column.
+
+  The email field is real and required: without an address there is no receipt, and checklist 5
+  makes the receipt the disclosure record. Saying so next to the field is what makes a
+  customer type a real one rather than "a@b.co".
+#}
+<section class="mx-auto max-w-copy px-4 pt-8 pb-16">
+
+  <a href="/preview" class="text-sm text-muted underline decoration-line underline-offset-4 hover:text-ink">&larr; Back to week 1</a>
+
+  <p class="eyebrow mt-5">{{ copy.trial_days }}-day trial &middot; cancel in one click</p>
+  <h1 class="band-heading mt-4">Unlock weeks 2 to 4</h1>
+  <p class="mt-2 text-muted leading-relaxed">
+    Your plan reference is <code class="rounded bg-cream border border-line px-1.5 py-0.5 text-sm">{{ plan_signature }}</code>,
+    so this screen and the preview are provably the same plan.
+  </p>
+
+  <form method="post" action="/checkout/start" class="mt-7 space-y-4">
+
+    {# --- checklist slots 1-4, inside the form, above the button --- #}
+    <div data-section="price-block" class="rounded-3xl border-2 border-ember/40 bg-ember-soft p-6 sm:p-7 shadow-[0_4px_14px_rgba(232,89,12,0.10)]">
+      <p class="text-lg sm:text-xl font-bold leading-snug text-balance">{{ copy.disclosure('price_line') }}</p>
+      <ul class="mt-3 space-y-1.5 text-sm">
+        {% for key in ('refund_line', 'cancel_line') %}
+          <li class="flex gap-2"><span class="text-ember-dark shrink-0 mt-0.5" aria-hidden="true">&#10003;</span><span>{{ copy.disclosure(key) }}</span></li>
+        {% endfor %}
+        <li class="flex gap-2"><span class="text-ember-dark shrink-0 mt-0.5" aria-hidden="true">&#10003;</span><span>{{ renewal_line }}</span></li>
+      </ul>
+      <p class="mt-3 text-sm">{{ copy.renewal_after_line }}</p>
+    </div>
+
+    <div class="surface-float rounded-3xl bg-white p-6">
+      <h3 class="eyebrow-title">What {{ copy.trial_amount }} gets you for {{ copy.trial_days }} days</h3>
+      <ul class="mt-3 space-y-2 text-sm">
+        {% for item in unlock_items %}
+          <li class="flex gap-2"><span class="text-ember shrink-0" aria-hidden="true">&#43;</span><span>{{ item }}</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <div class="rounded-3xl border border-line bg-white p-6">
+      <label class="block text-sm font-medium" for="email">Email for your receipt</label>
+      <input id="email" name="email" type="email" autocomplete="email" required
+             value="{{ email or '' }}"
+             class="mt-1.5 w-full rounded-2xl border border-line bg-white px-4 py-3.5 text-base"
+             placeholder="you@example.com">
+      <p class="mt-2 text-xs text-muted leading-relaxed">
+        The receipt repeats the amount, the renewal amount and the renewal date, and carries a
+        one-click cancel link. It is the record of what you agreed to, so an address you read.
+      </p>
+    </div>
+
+    {% if error %}
+      <p role="alert" class="rounded-2xl border-2 border-ember/50 bg-ember-soft px-4 py-3.5 text-sm font-medium">
+        {{ error }}
+      </p>
+    {% endif %}
+
+    <p class="text-sm leading-relaxed">{{ copy.checkout_legal_note }}</p>
+
+    <button type="submit" class="btn-primary px-6 py-4 text-lg font-semibold">
+      {{ copy.pay_button_label }}
+    </button>
+
+    <p class="text-xs text-muted text-center leading-relaxed">
+      Card details are entered on the next screen, which {{ brand }} does not see or store.
+      <a class="underline decoration-line underline-offset-2" href="/policy/privacy">Privacy</a> &middot;
+      <a class="underline decoration-line underline-offset-2" href="/policy/terms">Terms</a> &middot;
+      <a class="underline decoration-line underline-offset-2" href="/policy/refund">Refunds</a>
+    </p>
+  </form>
+
+  <div class="mt-8 space-y-3">
+    {% for heading, body in trust_points %}
+      <div class="rounded-2xl border border-line bg-cream/60 px-4 py-3.5">
+        <h3 class="font-semibold text-sm">{{ heading }}</h3>
+        <p class="text-xs text-muted mt-1 leading-relaxed">{{ body }}</p>
+      </div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

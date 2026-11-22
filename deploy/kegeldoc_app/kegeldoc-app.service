@@ -1,0 +1,91 @@
+# kegeldoc funnel (Lane C fork) — production unit.
+#
+# Documentation= takes a URI, not a path. It needs the file:// scheme: rendered to a bare
+# "/opt/ghost-x2/..." it is dropped at load with "Invalid URL, ignoring", which
+# `systemd-analyze verify` prints and `systemctl status` never mentions.
+#
+# Isolation is the point of this file, so the three facts that keep it apart from the other
+# services are at the top rather than buried below:
+#
+#   * Port 8091 only. `sirius-finance` holds 8000 and the compose/Caddy stack holds 3100;
+#     nothing here binds either.
+#   * Bind 127.0.0.1. The funnel is reachable from the internet only through the Cloudflare
+#     Tunnel. A public 0.0.0.0 bind would put an unauthenticated quiz + checkout surface on the
+#     VPS IP with nothing in front of it.
+#   * Its own venv and its own StateDirectory. It shares no process, no port and no database
+#     with the engine, so restarting this unit cannot blink the finance API.
+#
+# Install via deploy/kegeldoc_app/install-kegeldoc-app.sh, which substitutes the tokens and verifies
+# the result. Installing by hand means replacing every token in User=, Group= and ExecStart. A
+# leftover literal does not fail at `daemon-reload`, which accepts any ExecStart spelling; it fails
+# at start as status 203/EXEC, on the first restart after the one you checked. This comment names
+# no token on purpose: a `grep -rn` for the token shape over the installed units is the check that
+# catches a missed one, and a comment mentioning it by name would make that grep always find
+# something and therefore always lie.
+
+[Unit]
+Description=kegeldoc funnel (Lane C fork) (kegeldoc_app) on 127.0.0.1:8091
+Documentation=file://@REPO_DIR@/deploy/kegeldoc_app/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=@RUN_USER@
+Group=@RUN_USER@
+WorkingDirectory=@REPO_DIR@/kegeldoc_app
+# No `-` prefix, deliberately: with `-` a missing or misspelled .env is ignored and the funnel
+# starts anyway on every default, which looks healthy and is not (charges off, outbox transport,
+# repo-relative state paths that a redeploy can wipe). This header's own reason for existing is
+# that a green `systemctl status` is not evidence the config loaded, so make a bad path fail here
+# instead. A typo in the path now reads as status 204/EXEC or a config-file error, not silence.
+EnvironmentFile=@REPO_DIR@/kegeldoc_app/.env
+# Process env is read before the .env file is consulted, but the code treats the process
+# environment as the winner (config.load_dotenv uses os.environ.setdefault). Anything that must
+# beat the file — and FUNNEL_CHARGES_ENABLED should — belongs in an override:
+#   systemctl edit kegeldoc-app
+#   [Service]
+#   Environment=FUNNEL_CHARGES_ENABLED=true
+ExecStart=@VENV_PYTHON@ -m uvicorn main:app --host 127.0.0.1 --port 8091 --no-server-header
+Restart=always
+RestartSec=3
+
+# Persistent state. `StateDirectory=kegeldoc-app` makes and owns /var/lib/kegeldoc-app as the
+# service user before ExecStart, so the first write to billing.sqlite3 cannot fail on
+# permissions, and a `git pull` on the checkout can never touch billing state, WALS, or the
+# outbox. Point both databases and the outbox there in .env:
+#   FUNNEL_DB_PATH=/var/lib/kegeldoc-app/responses.sqlite3
+#   FUNNEL_BILLING_DB_PATH=/var/lib/kegeldoc-app/billing.sqlite3
+#   FUNNEL_EMAIL_OUTBOX=/var/lib/kegeldoc-app/outbox
+StateDirectory=kegeldoc-app
+StateDirectoryMode=0750
+# Safe here because the unit writes nothing under the checkout (no .pyc: PYTHONDONTWRITEBYTECODE,
+# no .pytest_cache: this is not a test run). A read-only tree is the cheaper guarantee than
+# remembering which paths the app is allowed to dirty.
+ProtectSystem=strict
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ProtectKernelTunables=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# Journal is the log: funnel.* lines carry the webhook rejections and the unsigned-webhook
+# warning, and they belong somewhere that survives a redeploy.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kegeldoc-app
+
+# Uvicorn graceful-close headroom. Stripe checkout redirects must not be cut mid-handshake by a
+# stop-signal that is too eager.
+TimeoutStopSec=30
+KillSignal=SIGINT
+KillMode=mixed
+
+# The one tradeoff to know about: `main:app` binds the settings read at *import* time
+# (main.py: settings = FunnelSettings.from_env()), and there is no reload endpoint. A changed
+# .env needs a restart, and nothing short of one picks it up:
+#   systemctl restart kegeldoc-app
+
+[Install]
+WantedBy=multi-user.target

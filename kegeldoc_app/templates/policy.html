@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} &middot; {{ brand }}{% endblock %}
+
+{% block main %}
+<section class="mx-auto max-w-copy px-4 pt-10 pb-16">
+  <h1 class="text-3xl font-bold tracking-tight">{{ title }}</h1>
+  {% if slug %}
+    <p class="mt-1.5 text-sm text-muted">Applies to {{ brand }} and to this offer only. Effective {{ copy.today }}.</p>
+  {% endif %}
+
+  <div class="mt-6 space-y-4 leading-relaxed">
+    {% for paragraph in paragraphs %}
+      <p>{{ paragraph }}</p>
+    {% else %}
+      <p class="text-muted">
+        That page does not exist. The policies are
+        <a class="underline decoration-line underline-offset-2" href="/policy/terms">terms</a>,
+        <a class="underline decoration-line underline-offset-2" href="/policy/privacy">privacy</a> and
+        <a class="underline decoration-line underline-offset-2" href="/policy/refund">refunds</a>.
+      </p>
+    {% endfor %}
+  </div>
+
+  {# Mandated sentences, shown on the page that any badge points at. A badge that promises
+     more than the policy it links to is closer to a deceptive representation than a dark
+     pattern, so the policy page repeats the exact wording the funnel uses elsewhere. #}
+  <div class="mt-9 rounded-2xl border border-line bg-cream p-5">
+    <h2 class="font-semibold">The short version, in the same words as everywhere else</h2>
+    <ul class="mt-3 space-y-2 text-sm">
+      {% for key, text in copy.disclosures.items() %}
+        <li class="flex gap-2"><span class="text-ember-dark shrink-0 mt-0.5" aria-hidden="true">&#10003;</span><span>{{ text }}</span></li>
+      {% endfor %}
+    </ul>
+  </div>
+
+  <p class="mt-8 text-sm">
+    Questions: <a class="underline decoration-line underline-offset-2" href="mailto:{{ support_email }}">{{ support_email }}</a>.
+    Write before escalating a charge and we will fix it faster than a dispute does.
+  </p>
+</section>
+{% endblock %}

@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% block title %}{{ brand }} &middot; Kegel plans for sexual health, for men and women{% endblock %}
+{% block body_class %}kd{% endblock %}
+{% block extra_styles %}{% endblock %}
+
+{% block main %}
+{#
+  Landing, ported from kegel_site/index.html onto the simple.life reference pattern (tinted
+  80px-radius bands, tight-tracked display type, one gradient word, pill CTAs, CSS phone mockups).
+  Server version differences: every price comes from `copy`, the three mandated disclosure lines
+  render under the first CTA (as on the routine funnel's landing), and the two track buttons POST
+  the first quiz answer rather than carrying it in a URL.
+
+  Nothing carrying a price or a disclosure line is `.reveal`: those render on first paint.
+#}
+<div class="wrap">
+
+  <section data-section="hero" class="band hero center" aria-labelledby="hero-h">
+    <div class="glow a" aria-hidden="true"></div>
+    <div class="glow b" aria-hidden="true"></div>
+    <div class="glow c" aria-hidden="true"></div>
+
+    <div class="measure" style="position:relative">
+      {% set accent = 'Strengthen' %}
+      <h1 id="hero-h" class="display">
+        {%- if copy.hero_headline.startswith(accent) -%}
+          <span class="grad-text">{{ accent }}</span>{{ copy.hero_headline[accent | length:] }}
+        {%- else -%}{{ copy.hero_headline }}{%- endif -%}
+      </h1>
+      <p class="lead" style="margin-top:20px">Kegel plans for men and women. Five quiet minutes a day, guided second by second, built around your body and your goal.</p>
+      <div style="margin-top:36px">
+        <a class="btn-cta" href="/onboarding">{{ copy.primary_cta }} <span aria-hidden="true">&rarr;</span></a>
+      </div>
+      <p class="muted" style="margin-top:14px;font-size:14px">{{ copy.cta_fine_print }}</p>
+      <ul class="hero-disclosures">
+        {% for key, text in copy.disclosures.items() %}
+          {% if key in ('price_line', 'cancel_line', 'refund_line') %}<li>{{ text }}</li>{% endif %}
+        {% endfor %}
+      </ul>
+    </div>
+
+    <div class="hero-phone-wrap">
+      <div class="phone cut" aria-hidden="true">
+        <div class="screen">
+          <div class="notch"></div>
+          <div class="status"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+          <div class="app-title">Today <span class="app-chip">Day 3 of 28</span></div>
+          <div class="ring">
+            <svg viewBox="0 0 200 200">
+              <defs><linearGradient id="rg" x1="0" x2="1"><stop offset="0" stop-color="#0b6f78"/><stop offset="1" stop-color="#157a5a"/></linearGradient></defs>
+              <circle cx="100" cy="100" r="85" fill="none" stroke="#dcebe8" stroke-width="14"/>
+              <circle class="ring-arc" cx="100" cy="100" r="85" fill="none" stroke="url(#rg)" stroke-width="14" stroke-linecap="round" stroke-dasharray="534" stroke-dashoffset="534"/>
+            </svg>
+            <div class="label"><span class="big">5s</span><span class="small">Squeeze &amp; lift</span></div>
+          </div>
+          <div class="pill-row"><span class="on">Slow holds</span><span>Quick</span><span>Relax</span></div>
+          <div class="coach"><b>Your cue</b>Breathe out as you lift. Keep your thighs, belly and glutes soft; only the floor works.</div>
+          <div class="today">Today&rsquo;s plan</div>
+          <div class="today-row"><i></i>Foundation set<em>5 min</em></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section data-section="proof" class="band white center" aria-labelledby="stats-h">
+    <span class="eyebrow reveal">Small muscle, big job</span>
+    <h2 id="stats-h" class="h2 measure reveal" style="margin-top:20px;--i:1">The routine fits anywhere, which is why it sticks</h2>
+    <div class="stats">
+      <div class="stat reveal" style="--i:0"><div class="k">A day</div><div class="v">5<small>min</small></div><div class="note">Short enough to do every day, which matters more than doing a lot.</div></div>
+      <div class="stat reveal" style="--i:1"><div class="k">Equipment</div><div class="v">0</div><div class="note">No device, no gadget. Sitting, standing or lying down.</div></div>
+      <div class="stat reveal" style="--i:2"><div class="k">Exercise types</div><div class="v">3</div><div class="note">Slow holds, quick squeezes and full relaxes, mixed for your goal.</div></div>
+    </div>
+  </section>
+
+  <section id="tools" data-section="features" class="band center" aria-labelledby="tools-h">
+    <h2 id="tools-h" class="h2 measure reveal">Everything a kegel routine needs</h2>
+    <div class="features">
+      <article class="feature reveal" style="--i:0">
+        <h3>Guided holds with a live timer</h3>
+        <div class="phone cut" aria-hidden="true"><div class="screen">
+          <div class="notch"></div><div class="status"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+          <div class="app-title" style="font-size:20px">Slow hold <span class="app-chip">Rep 4/10</span></div>
+          <div class="hold-bar"><i></i></div>
+          <div class="cue"><b>Lift&hellip; and hold</b>Imagine drawing a marble up and in. Keep breathing.</div>
+          <div class="list-mini"><div>Squeeze<em>5 s</em></div><div>Relax fully<em>5 s</em></div><div>Quick squeezes<em>&times;10</em></div></div>
+        </div></div>
+      </article>
+      <article class="feature f2 reveal" style="--i:1">
+        <h3>Separate plans for men and women</h3>
+        <div class="phone cut" aria-hidden="true"><div class="screen">
+          <div class="notch"></div><div class="status"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+          <div class="app-title" style="font-size:20px">Your focus</div>
+          <div class="track-tabs"><span>Men</span><span class="on">Women</span></div>
+          <div class="list-mini"><div>Fewer leaks on a cough<em>Goal</em></div><div>&ldquo;The knack&rdquo; drill<em>Daily</em></div><div>Endurance holds<em>Week 2</em></div><div>Relaxation drill<em>Daily</em></div></div>
+        </div></div>
+      </article>
+      <article class="feature f3 reveal" style="--i:2">
+        <h3>Progress you can see, week by week</h3>
+        <div class="phone cut" aria-hidden="true"><div class="screen">
+          <div class="notch"></div><div class="status"><span>9:41</span><span>&#9679;&#9679;&#9679;</span></div>
+          <div class="app-title" style="font-size:20px">Longest hold</div>
+          <div class="bars"><i style="height:30%" class="on"></i><i style="height:42%" class="on"></i><i style="height:48%" class="on"></i><i style="height:60%" class="on"></i><i style="height:66%"></i><i style="height:74%"></i><i style="height:82%"></i></div>
+          <div class="week-dots"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span></div>
+          <div class="list-mini"><div>Streak<em>4 days</em></div></div>
+        </div></div>
+      </article>
+    </div>
+  </section>
+
+  <section id="plans" data-section="tracks" class="band white center" aria-labelledby="plans-h">
+    <span class="eyebrow reveal">Two tracks</span>
+    <h2 id="plans-h" class="h2 measure reveal" style="margin-top:20px;--i:1">Built for <span class="grad-text">your</span> body, not an average one</h2>
+    <div class="split">
+      <article class="split-card reveal" style="background:var(--band);--i:0">
+        <span class="eyebrow">For men</span>
+        <h3>Control, stamina and confidence</h3>
+        <ul>
+          <li>Pelvic floor exercise has been studied for erection quality and for control over timing</li>
+          <li>Helps with the after-dribble many men notice once they&rsquo;ve finished urinating</li>
+          <li>Part of recovery after prostate surgery, once your care team says go</li>
+        </ul>
+        <form method="post" action="/onboarding/0"><input type="hidden" name="answer" value="men"><button class="btn-dark" type="submit">Start the men&rsquo;s plan</button></form>
+      </article>
+      <article class="split-card reveal" style="background:var(--band);--i:1">
+        <span class="eyebrow">For women</span>
+        <h3>Strength for every stage of life</h3>
+        <ul>
+          <li>Fewer leaks when you cough, laugh, sneeze or run</li>
+          <li>Rebuilding after pregnancy and birth, once you&rsquo;ve been cleared to exercise</li>
+          <li>Support through perimenopause and beyond, plus sensation and comfort during sex</li>
+        </ul>
+        <form method="post" action="/onboarding/0"><input type="hidden" name="answer" value="women"><button class="btn-dark" type="submit">Start the women&rsquo;s plan</button></form>
+      </article>
+    </div>
+  </section>
+
+  <section id="how" data-section="how" class="band white center" aria-labelledby="how-h" style="padding-top:0">
+    <h2 id="how-h" class="h2 measure reveal">How it works</h2>
+    <div class="steps">
+      {% for number, heading, body in steps %}
+        <div class="step reveal" style="--i:{{ loop.index0 }}"><h3>{{ heading }}</h3><p>{{ body }}</p></div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section id="faq" data-section="faq" class="band center" aria-labelledby="faq-h">
+    <span class="eyebrow reveal">FAQ</span>
+    <h2 id="faq-h" class="h2 reveal" style="margin-top:20px;--i:1">Got a question?</h2>
+    <div class="faq">
+      <details class="reveal"><summary>What exactly is a kegel?<span class="plus" aria-hidden="true"></span></summary><div class="answer"><p>A kegel is a squeeze-and-lift of the pelvic floor, the sling of muscle under your bladder and bowel (and uterus, if you have one). It&rsquo;s the feeling of holding in wind, then letting go completely. The letting go is half the exercise.</p></div></details>
+      <details class="reveal"><summary>How do I know I&rsquo;m doing them right?<span class="plus" aria-hidden="true"></span></summary><div class="answer"><p>Your plan opens with a finding-the-muscle session and short cues on every rep: breathe normally, keep your belly, thighs and buttocks soft, and feel a lift inward rather than a push down. If you still can&rsquo;t feel it after a couple of weeks, a pelvic health physiotherapist can check in person.</p></div></details>
+      <details class="reveal"><summary>How long before I notice anything?<span class="plus" aria-hidden="true"></span></summary><div class="answer"><p>It varies a lot from person to person. Muscle training generally takes weeks of steady practice, and many programmes run for three months. We don&rsquo;t promise a date; the plan tracks your hold times so you can see your own trend.</p></div></details>
+      <details class="reveal"><summary>Who should check with a doctor first?<span class="plus" aria-hidden="true"></span></summary><div class="answer"><p>Anyone with pelvic pain, pain during sex, blood in urine, a sudden change in bladder or bowel habits, a feeling of heaviness or bulging, or who is pregnant, recently gave birth or recently had pelvic surgery. kegeldoc is general exercise guidance, not medical advice, and no doctor reviews individual plans.</p></div></details>
+      <details class="reveal"><summary>What does it cost?<span class="plus" aria-hidden="true"></span></summary><div class="answer"><p>The quiz and your full week 1 are free to read. Weeks 2 to 4 and the guided timer are {{ copy.trial_amount }} for a {{ copy.trial_days }}-day trial, then {{ copy.rebill_per_month }} until you cancel. You can cancel in one click from your account page.</p></div></details>
+    </div>
+  </section>
+
+  <section data-section="close" class="band white center" aria-labelledby="close-h">
+    {# Carries the price in its fine print, so it is not a `.reveal`. #}
+    <div class="glow a" style="top:-120px" aria-hidden="true"></div>
+    <div class="glow b" style="top:-60px" aria-hidden="true"></div>
+    <div class="measure" style="position:relative">
+      <h2 id="close-h" class="h2">Five minutes a day, <span class="grad-text">guided</span> every second</h2>
+      <p class="lead" style="margin-top:20px">A few minutes of questions, then a week of sessions written for you.</p>
+      <div style="margin-top:36px"><a class="btn-cta" href="/onboarding">{{ copy.primary_cta }} <span aria-hidden="true">&rarr;</span></a></div>
+      <p class="muted" style="margin-top:14px;font-size:14px">{{ copy.cta_fine_print }}</p>
+    </div>
+  </section>
+
+</div>
+{% endblock %}

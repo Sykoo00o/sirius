@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Your week 1 &middot; {{ brand }}{% endblock %}
+{% block body_class %}kd quiz-body{% endblock %}
+{% block extra_styles %}{% endblock %}
+
+{#
+  The pre-paywall artefact. The routine funnel's three rules, unchanged:
+
+  1. Week 1 renders completely: every hold, rest and rep, nothing blurred or truncated, no
+     sign-up gate, because the artefact is the thing that must survive being inspected.
+  2. Weeks 2-4 are genuinely absent, not hidden: the lock says what changes (WEEK_ARCS).
+  3. The recurring price and all four disclosures sit on this page too.
+
+  Kegel additions: the safety note renders above week 1 whenever an answer warrants a clinician
+  first, and the lifestyle notes are observations, never promises. The ask block carries prices
+  and disclosures, so it is never `.reveal`.
+#}
+{% block main %}
+<div class="quiz-main screen-in">
+
+  <section data-section="preview-header" class="result-head">
+    <div class="glow a" style="left:-140px;top:-120px;width:320px;height:320px" aria-hidden="true"></div>
+    <div class="glow b" style="right:-140px;top:40px;width:300px;height:300px" aria-hidden="true"></div>
+    <span class="eyebrow" style="position:relative">Week 1 of 4 &middot; free to read</span>
+    {% set accent = plan.focus | lower %}
+    <h1>A {{ plan.minutes }}-minute daily kegel plan for <span class="grad-text">{{ accent }}</span></h1>
+    <p class="muted" style="margin-top:12px;position:relative">{{ plan.coach_note }}</p>
+    <dl class="kv">
+      <div><dt>Focus</dt><dd>{{ plan.focus }}</dd></div>
+      <div><dt>Starting level</dt><dd>{{ plan.level_name }}</dd></div>
+      <div><dt>Starting hold</dt><dd>{{ plan.hold_seconds }} seconds</dd></div>
+      <div><dt>Daily drill</dt><dd>{{ plan.drill_name }}</dd></div>
+    </dl>
+  </section>
+
+  {% if plan.safety_note %}
+    <div class="safety" data-section="preview-safety"><b>Before you start</b>{{ plan.safety_note }}</div>
+  {% endif %}
+
+  <section data-section="preview-days" aria-labelledby="week1">
+    <h2 id="week1" class="sec-title">Week 1, free to read</h2>
+    <p class="muted" style="margin-top:4px;font-size:14px">{{ plan.week_arc.arc }} Tap a day to see every rep.</p>
+    {% for day in plan.days %}
+      <details class="day"{% if loop.index <= 2 %} open{% endif %}>
+        <summary>
+          <span class="d">{{ day.short }}</span>
+          <span class="t">{{ day.title }}<span class="m" style="display:block">{{ day.minutes }} min</span></span>
+          <span class="caret" aria-hidden="true">&#9662;</span>
+        </summary>
+        <ol>{% for step in day.steps %}<li>{{ step }}</li>{% endfor %}</ol>
+      </details>
+    {% endfor %}
+  </section>
+
+  <section data-section="preview-drill" aria-labelledby="drill-h">
+    <h2 id="drill-h" class="sec-title">Your daily drill: {{ plan.drill_name }}</h2>
+    <div class="locked" style="border-style:solid;background:#fff;color:var(--ink)">{{ plan.drill_text }}</div>
+  </section>
+
+  <section data-section="preview-metrics" aria-labelledby="metrics-h">
+    <h2 id="metrics-h" class="sec-title">What you track</h2>
+    <dl class="sum-list">
+      {% for row in plan.metrics %}
+        <div><dt>{{ row[0] }}</dt><dd><span class="chip">{{ row[1] }}</span></dd><dd class="muted" style="font-size:13px">{{ row[2] }}</dd></div>
+      {% endfor %}
+    </dl>
+  </section>
+
+  {% if plan.tips %}
+    <section data-section="preview-tips" aria-labelledby="tips-h">
+      <h2 id="tips-h" class="sec-title">Notes from your answers</h2>
+      <ul class="tips">{% for tip in plan.tips %}<li>{{ tip }}</li>{% endfor %}</ul>
+    </section>
+  {% endif %}
+
+  <section aria-labelledby="locked-h">
+    <h2 id="locked-h" class="sec-title">Weeks 2 to 4</h2>
+    {% for arc in locked_weeks %}
+      <div class="locked"><b>Week {{ arc.week }} &middot; {{ arc.label }}.</b> {{ arc.arc }}</div>
+    {% endfor %}
+  </section>
+
+  <section data-section="preview-ask" class="price-card" aria-labelledby="unlock">
+    <h2 id="unlock">Unlock weeks 2 to 4 and the guided timer</h2>
+    <p class="price-line">{{ copy.disclosure('price_line') }}</p>
+    <ul class="disclosure-list">
+      {% for key, text in copy.disclosures.items() %}{% if key != 'price_line' %}<li>{{ text }}</li>{% endif %}{% endfor %}
+      <li>Week 1 above is yours either way.</li>
+    </ul>
+    <a class="btn-cta" href="/checkout">Unlock weeks 2 to 4 <span aria-hidden="true">&rarr;</span></a>
+    <small>Or keep week 1 and do nothing. It cost nothing and no card detail was asked for.</small>
+  </section>
+
+  <p class="plan-ref">
+    Plan reference <code>{{ plan.profile_signature }}</code>. Same {{ total }} answers, same plan, every time.
+    {% if llm_live %}The coach note was written by a language model and checked against our copy rules.{% else %}Every sentence on this page was written by us.{% endif %}
+  </p>
+  <p class="note-small">General pelvic floor exercise guidance, not medical advice. Results vary with your starting point and how consistently you practise.</p>
+</div>
+{% endblock %}
