@@ -99,6 +99,10 @@ async def telegram_webhook(update: dict[str, Any] = Body(...), store: FinanceSto
 - **Implemented:** <what changed, file(s)>
 - **Verified:** <syntax check, systemd restart, API response, etc.>
 -->
+### 2026-11-22 — Routine Lab: stylesheet link versioned by content hash (DEPLOYED)
+- **Git commit:** `d448eef`, pushed to `origin/main`, pulled on the VPS, `funnel-app` restarted.
+- **Implemented:** same fix as kegeldoc's `5a3c2b3`: `funnel_app/main._asset_version("app.css")` and `base.html` links `/static/app.css?v=<hash>`, so Cloudflare's 4-hour cache no longer holds old styles after a deploy. Test `test_stylesheet_links_carry_a_content_version` in `test_design_pattern.py`.
+- **Verified:** Routine Lab suite 371 passed; `funnel-app` active, `/health` 200 on the host; `routinelab.vegastudios.site` links `app.css?v=2172eb5c86`, matching the local file's SHA-256 prefix, and that URL serves 200.
 ### 2026-11-22 — kegeldoc polish DEPLOYED, plus a CDN cache fix for stylesheets
 - **Git commit:** `69ed3e4` (polish) and `5a3c2b3` (cache fix), pushed to `origin/main` and pulled on the VPS; `kegeldoc-app` restarted twice, active, `/health` `"failures": 0`.
 - **Found on verify:** Cloudflare served `/static/kegeldoc.css` from cache (`cf-cache-status: HIT`, `max-age=14400`, age ~50 min), so the new markup rendered with the old stylesheet; the previous charts/discount deploy was affected the same way until its cache expired. Fix: `main._asset_version` hashes `kegeldoc.css` + `app.css` at startup and `base.html` links them as `?v=<hash>`, so each deploy that changes CSS gets a fresh URL. Test `test_stylesheet_links_carry_a_content_version`. Routine Lab (`funnel_app`) has the same unversioned links and was not changed.
