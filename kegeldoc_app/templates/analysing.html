@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Analysing your answers &middot; {{ brand }}{% endblock %}
 {% block body_class %}kd quiz-body{% endblock %}
-{% block extra_styles %}<noscript><meta http-equiv="refresh" content="6;url=/welcome"></noscript>{% endblock %}
+{% block extra_styles %}<noscript><meta http-equiv="refresh" content="10;url=/welcome"></noscript>{% endblock %}
 {% block main_class %}{% endblock %}
 {% block header %}{% include "_flow_header.html" %}{% endblock %}
 
 {#
   After the last answer: one bar per thing the plan builder reads, filled in turn, then on to the
-  welcome screen. Without JavaScript the bars render full, a meta refresh moves on after six
+  welcome screen. Without JavaScript the bars render full, a meta refresh moves on after ten
   seconds, and the Continue link is always there.
 #}
 {% block main %}
@@ -40,18 +40,25 @@
     li.querySelector('.a-track').setAttribute('aria-valuenow', pct);
     li.classList.toggle('done', pct >= 100);
   }
+  // About 1.8 seconds a bar with an uneven pace and a short beat between bars, roughly ten
+  // seconds in all. setTimeout rather than rAF: a backgrounded tab must still finish.
   var i = 0, pct = 0;
-  // setInterval rather than rAF: a backgrounded tab must still finish the analysis.
-  var timer = setInterval(function () {
-    pct = Math.min(100, pct + 4 + Math.round(Math.random() * 5));
+  function tick() {
+    pct = Math.min(100, pct + 3 + Math.round(Math.random() * 3));
     set(rows[i], pct);
-    if (pct >= 100) { i += 1; pct = 0; }
-    if (i >= rows.length) {
-      clearInterval(timer);
-      next.removeAttribute('aria-disabled'); next.classList.remove('is-waiting');
-      setTimeout(function () { window.location.href = '/welcome'; }, 700);
+    if (pct >= 100) {
+      i += 1; pct = 0;
+      if (i >= rows.length) {
+        next.removeAttribute('aria-disabled'); next.classList.remove('is-waiting');
+        setTimeout(function () { window.location.href = '/welcome'; }, 900);
+        return;
+      }
+      setTimeout(tick, 300);
+      return;
     }
-  }, 60);
+    setTimeout(tick, 55 + Math.round(Math.random() * 30));
+  }
+  setTimeout(tick, 400);
 })();
 </script>
 {% endblock %}

@@ -99,6 +99,10 @@ async def telegram_webhook(update: dict[str, Any] = Body(...), store: FinanceSto
 - **Implemented:** <what changed, file(s)>
 - **Verified:** <syntax check, systemd restart, API response, etc.>
 -->
+### 2026-11-22 — kegeldoc polish: animated Excellent/Great score, slower analysis, study screens fit one phone screen (local; not yet deployed)
+- **Git commit:** see the commit carrying this entry.
+- **Implemented:** `main.compatibility` now returns Excellent (96%), or Great (91%) when the plan carries a clinician note (the note still shows); the ring fills over 1.6 s while the percentage counts up from 0, and the word fades in at the end (reduced-motion: static). Analysing bars slowed from ~5 s to ~10 s in total (uneven pace, short beat between bars; no-JS refresh 6 s → 10 s). Study screens (`.fact.study`: Dorey, Pastore, Cochrane charts) tightened so chart, title, text and Continue fit one phone screen. On phone quiz screens the "Rehearsal mode" banner now sits at the end of the page instead of fixed over the sticky Continue button; checkout pages keep it fixed.
+- **Verified:** kegeldoc suite 324 passed (score tests updated to Excellent/Great). Browser at 375×812: Dorey screen Continue ends at 764 px, Pastore at 672 px, no horizontal scroll; at 375×667 the sticky button stays in view (588–652 px); analysis timed at 9.3 s to the last bar, then auto-advance; compatibility counted up (87% mid-way) and settled on 96% Excellent.
 ### 2026-11-22 — kegeldoc charts + 10-minute discount DEPLOYED to `kegeldoc.vegastudios.site`
 - **Git commit:** `0a67520` pushed to `origin/main`, pulled fast-forward on the VPS.
 - **Implemented:** added `FUNNEL_INTRO_DISCOUNT_BPS=3550` and `FUNNEL_INTRO_DISCOUNT_MINUTES=10` to the VPS `kegeldoc_app/.env`, restarted `kegeldoc-app` (charges still off).

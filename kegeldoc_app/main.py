@@ -622,12 +622,13 @@ def _track_of(stored: dict[str, Any]) -> str:
 
 
 def compatibility(plan: Plan) -> dict[str, str]:
-    """How well a kegel plan fits these answers. High unless an answer needs a clinician first."""
+    """How well a kegel plan fits these answers: Excellent, or Great when an answer means a
+    clinician should be seen first (the note then says so, and the plan starts gently)."""
     if plan.safety_note:
-        return {"level": "Good", "pct": "72",
+        return {"level": "Great", "pct": "91",
                 "note": "A kegel plan fits your goals, starting gently. One of your answers is "
                         "worth checking with a doctor or pelvic health physiotherapist first."}
-    return {"level": "High", "pct": "94",
+    return {"level": "Excellent", "pct": "96",
             "note": "Your answers match the people a structured, daily kegel plan is built for."}
 
 

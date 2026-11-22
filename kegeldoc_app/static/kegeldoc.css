@@ -416,7 +416,7 @@ html.js .autosubmit-cta { display: none; }
 .a-row b { font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 600; }
 .a-bars li.done .a-row { color: var(--ink); }
 .a-track { margin-top: 8px; height: 10px; border-radius: 99px; background: #e3eaea; overflow: hidden; }
-.a-track i { display: block; height: 100%; border-radius: inherit; background: var(--grad); transition: width .12s linear; }
+.a-track i { display: block; height: 100%; border-radius: inherit; background: var(--grad); transition: width .2s linear; }
 .btn-cta.is-waiting { opacity: .45; pointer-events: none; }
 
 .welcome-art { width: 132px; height: 132px; margin: 8px auto 18px; animation: pop .5s var(--ease) both; }
@@ -428,10 +428,12 @@ html.js .autosubmit-cta { display: none; }
 
 .compat-ring { position: relative; width: 200px; height: 200px; margin: 26px auto 0; }
 .compat-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
-.compat-ring .arc { animation: arc 1.2s var(--ease) both; }
+.compat-ring .arc { animation: arc 1.6s cubic-bezier(.33,1,.68,1) .25s both; }
 @keyframes arc { from { stroke-dasharray: 0 100; } }
 .compat-ring .label { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
-.compat-ring .label b { font-size: 40px; font-weight: 700; letter-spacing: -1.2px; line-height: 1; color: var(--teal); }
+.compat-pct { font-size: 44px; font-weight: 800; letter-spacing: -1.4px; line-height: 1; color: var(--ink); font-variant-numeric: tabular-nums; }
+.compat-ring .label b { font-size: 20px; font-weight: 700; line-height: 1.1; color: var(--teal); margin-top: 6px; animation: compat-word .5s var(--ease) 1.6s both; }
+@keyframes compat-word { from { opacity: 0; transform: translateY(4px); } }
 .compat-ring .label small { font-size: 12px; font-weight: 600; color: var(--ink-60); margin-top: 6px; text-transform: uppercase; letter-spacing: .6px; }
 .compat-kv { text-align: left; }
 
@@ -457,7 +459,7 @@ html.js .autosubmit-cta { display: none; }
 .po-terms { grid-column: 1 / -1; font-size: 12px; line-height: 18px; color: var(--ink-60); }
 .plan-pick .btn-cta { width: 100%; margin-top: 18px; }
 .po-cancel { margin-top: 10px; font-size: 13px; color: var(--ink-60); text-align: center; }
-@media (prefers-reduced-motion: reduce) { .welcome-art, .compat-ring .arc { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .welcome-art, .compat-ring .arc, .compat-ring .label b { animation: none; } }
 
 /* ---------- fact screens: study charts and illustrations ---------- */
 .fact .art.wide { width: 100%; height: auto; max-width: 360px; }
@@ -493,3 +495,20 @@ html.js .autosubmit-cta { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .illo .rep, .illo .sling.lifted, .chart-track i { animation: none; }
 }
+
+/* ---------- study screens: chart, title, text and Continue on one phone screen ---------- */
+.fact.study { margin-top: 0; padding: 18px 18px 20px; border-radius: 26px; }
+.fact.study .chart { margin-bottom: 14px; padding: 12px 14px 10px; border-radius: 16px; }
+.fact.study .chart-title { font-size: 14px; line-height: 18px; margin-bottom: 8px; }
+.fact.study .chart-group { margin: 6px 0 2px; font-size: 11px; }
+.fact.study .chart-row { margin-bottom: 6px; gap: 2px 10px; }
+.fact.study .chart-label { font-size: 12px; }
+.fact.study .chart-val { font-size: 14px; }
+.fact.study .chart-track { height: 8px; }
+.fact.study .chart-note { margin-top: 4px; font-size: 11px; line-height: 15px; }
+.kd .quiz-main .fact.study .eyebrow { margin-bottom: 8px; }
+.fact.study .fact-title { font-size: 22px; line-height: 27px; letter-spacing: -.4px; }
+.fact.study p { margin-top: 8px; font-size: 15px; line-height: 21px; }
+.fact.study .src { margin-top: 8px; font-size: 11px; line-height: 15px; }
+.quiz-main:has(.fact.study) { padding-top: 12px; }
+.quiz-main:has(.fact.study) .quiz-cta { margin-top: 4px; padding-top: 12px; }

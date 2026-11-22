@@ -6,7 +6,7 @@
 {% block header %}{% include "_flow_header.html" %}{% endblock %}
 
 {#
-  The score is derived, not fixed: `main.compatibility` reads the plan and drops from High to Good
+  The score is derived, not fixed: `main.compatibility` reads the plan and reads Great instead of Excellent
   whenever an answer means a clinician should be seen first, and the note says so.
 #}
 {% block main %}
@@ -16,7 +16,7 @@
     <h1 class="fact-title">Your compatibility score with a kegel plan</h1>
     <div class="compat-ring" style="--pct:{{ score.pct }}">
       <svg viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="52" fill="none" stroke="#e7f3f1" stroke-width="12"/><circle class="arc" cx="60" cy="60" r="52" fill="none" stroke="url(#cg)" stroke-width="12" stroke-linecap="round" pathLength="100" stroke-dasharray="{{ score.pct }} 100"/><defs><linearGradient id="cg" x1="0" x2="1"><stop offset="0" stop-color="#0b6f78"/><stop offset="1" stop-color="#157a5a"/></linearGradient></defs></svg>
-      <div class="label"><b>{{ score.level }}</b><small>compatibility</small></div>
+      <div class="label"><span class="compat-pct" data-to="{{ score.pct }}">{{ score.pct }}%</span><b>{{ score.level }}</b><small>compatibility</small></div>
     </div>
     <p class="compat-note">{{ score.note }}</p>
     <dl class="kv compat-kv">
@@ -29,4 +29,20 @@
     <div class="quiz-cta"><a class="btn-cta" href="/email">Continue <span aria-hidden="true">&rarr;</span></a></div>
   </section>
 </div>
+<script>
+(function () {
+  // Count the percentage up in step with the ring's fill animation (1.6s, ease-out).
+  var el = document.querySelector('.compat-pct');
+  if (!el || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  var to = Number(el.dataset.to), start = null, dur = 1600;
+  el.textContent = '0%';
+  function step(t) {
+    if (start === null) start = t;
+    var k = Math.min(1, (t - start) / dur), eased = 1 - Math.pow(1 - k, 3);
+    el.textContent = Math.round(to * eased) + '%';
+    if (k < 1) requestAnimationFrame(step);
+  }
+  setTimeout(function () { requestAnimationFrame(step); }, 250);
+})();
+</script>
 {% endblock %}

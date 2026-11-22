@@ -124,7 +124,7 @@
   {% endif %}
 
   {% if question.kind == 'fact' %}
-    <div class="fact">
+    <div class="fact{% if question.chart %} study{% endif %}">
       {% if question.chart %}{{ chart(charts[question.chart]) }}{% else %}<div class="art{% if question.art != 'floor' %} wide{% endif %}">{{ art(question.art) }}</div>{% endif %}
       <span class="eyebrow">{{ question.eyebrow }}</span>
       <h1 class="fact-title">{{ question.title }}</h1>

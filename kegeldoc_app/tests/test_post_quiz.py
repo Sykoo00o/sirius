@@ -58,14 +58,14 @@ def test_welcome_names_the_track_the_visitor_chose(client):
 def test_compatibility_is_high_for_a_plain_profile(client):
     _quiz_only(client)
     text = client.get("/compatibility").text
-    assert "<b>High</b>" in text and 'href="/email"' in text
+    assert "<b>Excellent</b>" in text and 'href="/email"' in text
 
 
 def test_compatibility_drops_when_an_answer_needs_a_clinician():
     import main
     from plan_builder import Profile, build_plan
-    assert main.compatibility(build_plan(Profile(safety=frozenset({"pain"}))))["level"] == "Good"
-    assert main.compatibility(build_plan(Profile()))["level"] == "High"
+    assert main.compatibility(build_plan(Profile(safety=frozenset({"pain"}))))["level"] == "Great"
+    assert main.compatibility(build_plan(Profile()))["level"] == "Excellent"
 
 
 def test_the_plan_and_paywall_wait_for_an_email(client):

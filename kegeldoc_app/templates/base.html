@@ -49,6 +49,9 @@
     box-shadow: 0 10px 30px -10px rgba(29,43,54,.5); }
   .rehearsal strong { display: block; margin-bottom: 2px; }
   @media (min-width: 640px) { .rehearsal { left: auto; right: 16px; max-width: 300px; } }
+  /* On phone quiz screens the fixed banner sat over the sticky Continue button, so there it
+     sits at the end of the page instead. Checkout pages keep it fixed beside the card form. */
+  @media (max-width: 639px) { .quiz-body .rehearsal { position: static; margin: 0 16px 16px; } }
   .site-footer .links { flex-wrap: wrap; }
 </style>
 </head>
