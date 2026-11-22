@@ -72,7 +72,12 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-FUNNEL_ROOT = REPO_ROOT / "funnel_app"
+#: Which funnel's databases and `.env` to read. Defaults to Routine Lab (`funnel_app`), so every
+#: existing cron line and unit keeps its meaning; the kegeldoc fork runs the same script with
+#: `FUNNEL_APP_DIR=<repo>/kegeldoc_app`. A relative value resolves against the repo root.
+_APP_DIR = os.environ.get("FUNNEL_APP_DIR", "").strip()
+FUNNEL_ROOT = (REPO_ROOT / _APP_DIR if _APP_DIR and not Path(_APP_DIR).is_absolute()
+               else Path(_APP_DIR) if _APP_DIR else REPO_ROOT / "funnel_app")
 
 #: Loaded for its `.env` reader and for `OFFER_ID`, so the export's variant label and the
 #: funnel's own label cannot drift apart. A copy of that string here would be a second source
