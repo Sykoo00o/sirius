@@ -367,7 +367,7 @@ if [ "$BAD" -gt 0 ]; then
   # before, and a corrected re-run of this script picks up from here.
   fail "$BAD blocker(s) unresolved, so nothing was started. Fix them and re-run --apply."
   say ""
-  say "units installed (not started): $UNITS_DIR/funnel-*.{service,timer}"
+  say "units installed (not started): $UNITS_DIR/kegeldoc-*.{service,timer}"
   exit 1
 fi
 systemctl enable kegeldoc-app.service kegeldoc-notices.timer kegeldoc-metrics.timer >/dev/null
@@ -395,6 +395,12 @@ else
   systemctl start kegeldoc-app.service
   ok "started kegeldoc-app.service (8091 was free)"
 fi
+# `enable` alone only wires the timers for the *next boot*. Start them now, or the first install
+# leaves both daily jobs dormant until a reboot nobody schedules: observed on the kegeldoc apply,
+# where both timers read enabled/inactive and `list-timers` did not show them. Idempotent on a
+# redeploy, where they are already running.
+systemctl start kegeldoc-notices.timer kegeldoc-metrics.timer
+ok "timers running: $(systemctl is-active kegeldoc-notices.timer) / $(systemctl is-active kegeldoc-metrics.timer) (kegeldoc-notices.timer / kegeldoc-metrics.timer)"
 # Printed as an observation, not a verdict, and the reason is worth keeping. The first version of
 # this line claimed the counter "survives a successful restart" and skipped `reset-failed` for that
 # reason. Measured one commit later, in the very apply that proved the fix: the unit had flapped 50

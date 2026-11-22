@@ -395,6 +395,12 @@ else
   systemctl start funnel-app.service
   ok "started funnel-app.service (8090 was free)"
 fi
+# `enable` alone only wires the timers for the *next boot*. Start them now, or the first install
+# leaves both daily jobs dormant until a reboot nobody schedules: observed on the kegeldoc apply,
+# where both timers read enabled/inactive and `list-timers` did not show them. Idempotent on a
+# redeploy, where they are already running.
+systemctl start funnel-notices.timer funnel-metrics.timer
+ok "timers running: $(systemctl is-active funnel-notices.timer) / $(systemctl is-active funnel-metrics.timer) (funnel-notices.timer / funnel-metrics.timer)"
 # Printed as an observation, not a verdict, and the reason is worth keeping. The first version of
 # this line claimed the counter "survives a successful restart" and skipped `reset-failed` for that
 # reason. Measured one commit later, in the very apply that proved the fix: the unit had flapped 50
