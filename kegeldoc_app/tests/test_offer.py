@@ -180,3 +180,15 @@ def test_a_study_screen_renders_its_chart(client):
             return
         post(client, f"/onboarding/{index}", pairs)
     raise AssertionError("no study screen rendered a chart on the walk")
+
+
+def test_stylesheet_links_carry_a_content_version(client):
+    """A deploy's CSS must not wait out a CDN cache: the link changes when the file does."""
+    html = client.get("/").text
+    version = client.main.templates.env.globals["asset_v"]
+    assert len(version) == 10
+    assert f'/static/kegeldoc.css?v={version}"' in html
+    import re
+    for page in ("/", "/health"):
+        links = re.findall(r'href="(/static/[\w.-]+\.css[^"]*)"', client.get(page).text)
+        assert links and all(f"?v={version}" in link for link in links), (page, links)

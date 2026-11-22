@@ -87,6 +87,25 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 #: `settings` gets its own currency.
 templates.env.globals["money"] = lambda minor: money(int(minor), settings.currency)
 templates.env.globals["charts"] = CHARTS
+
+
+def _asset_version(*names: str) -> str:
+    """A short content hash of the stylesheets, appended as `?v=` to their links.
+
+    Cloudflare and browsers cache `/static/` for hours, so without this a deploy's CSS reaches
+    visitors only after the cache expires, and new markup renders with old styles meanwhile.
+    """
+    import hashlib
+    digest = hashlib.sha256()
+    for name in names:
+        try:
+            digest.update((BASE_DIR / "static" / name).read_bytes())
+        except OSError:
+            pass
+    return digest.hexdigest()[:10]
+
+
+templates.env.globals["asset_v"] = _asset_version("kegeldoc.css", "app.css")
 store = ResponseStore(settings.database_abspath)
 billing_store = BillingStore(settings.billing_database_abspath)
 #: Funnel telemetry lives in the *billing* database file, beside the subscription rows rather
