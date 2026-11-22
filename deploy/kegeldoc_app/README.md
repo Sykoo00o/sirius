@@ -124,8 +124,8 @@ browser.
 Set the two addresses and the hostname once, at the top:
 
 ```bash
-FUNNEL_HOSTNAME=kegeldoc.example.com
-SUPPORT_EMAIL=support@kegeldoc.example.com
+FUNNEL_HOSTNAME=kegeldoc.vegastudios.site
+SUPPORT_EMAIL=support@vegastudios.site
 ```
 
 The template carries three marked values on three assignment lines; no comment contains one, so a
@@ -313,7 +313,7 @@ sudoedit /etc/cloudflared/config.yml
 Add, before the catch-all (full commentary in `cloudflared-ingress.yml`):
 
 ```yaml
-  - hostname: kegeldoc.example.com
+  - hostname: kegeldoc.vegastudios.site
     service: http://127.0.0.1:8091
     originRequest:
       keepAliveTimeout: 90s
@@ -328,7 +328,7 @@ exit code plus the `OK` line: `validate ... | grep -v '^$' && ...` grades grep, 
 word "valid" matches the string "Validate the ingress configuration" in a usage-error dump.
 
 ```bash
-sudo cloudflared tunnel route dns <TUNNEL_NAME_OR_UUID> kegeldoc.example.com
+sudo cloudflared tunnel route dns <TUNNEL_NAME_OR_UUID> kegeldoc.vegastudios.site
 # `--config` belongs to the `tunnel` verb, not to `ingress validate` (a flag error there prints a
 # usage dump and still exits 0). Capture, then judge on rc AND the success line.
 OUT=$(mktemp); sudo cloudflared tunnel --config /etc/cloudflared/config.yml ingress validate >"$OUT" 2>&1
@@ -337,22 +337,22 @@ rc=$?; cat "$OUT"
 # a broken ingress must print rc!=0 — if your guard passes that too, it is not a guard:
 #   printf '...ingress:\n  - service: not-a-url\n' > /tmp/x.yml
 #   sudo cloudflared tunnel --config /tmp/x.yml ingress validate; echo "rc=$? (expect non-zero)"
-sudo cloudflared tunnel ingress rule https://kegeldoc.example.com/health   # must print service: http://127.0.0.1:8091
+sudo cloudflared tunnel ingress rule https://kegeldoc.vegastudios.site/health   # must print service: http://127.0.0.1:8091
 sudo systemctl restart cloudflared
 ```
 
 Verify end to end, including the exact path Stripe will use:
 
 ```bash
-curl -sI https://kegeldoc.example.com/health | head -1                  # HTTP/2 200
-curl -s https://kegeldoc.example.com/health | grep -i -A4 'billing'     # rehearsal state, keys named
+curl -sI https://kegeldoc.vegastudios.site/health | head -1                  # HTTP/2 200
+curl -s https://kegeldoc.vegastudios.site/health | grep -i -A4 'billing'     # rehearsal state, keys named
 ```
 
 Probe the webhook route through the tunnel, and read the code by which stage you are at (both
 numbers below were taken from a running instance, not reasoned out):
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' -X POST https://kegeldoc.example.com/webhooks/stripe
+curl -s -o /dev/null -w '%{http_code}\n' -X POST https://kegeldoc.vegastudios.site/webhooks/stripe
 ```
 
 * **Before** `STRIPE_WEBHOOK_SECRET_FUNNEL` is set: `200 {"received":true,"result":"ignored:"}`.
@@ -372,7 +372,7 @@ In the **funnel** merchant account (never the B2B one; a foreign account's event
 ceilings is how a lane dies of somebody else's chargebacks), add an endpoint:
 
 ```
-URL:     https://kegeldoc.example.com/webhooks/stripe
+URL:     https://kegeldoc.vegastudios.site/webhooks/stripe
 Version: the API version pinned by STRIPE_API_VERSION, or the current one
 Events:  checkout.session.completed, checkout.session.expired, invoice.paid,
          invoice.payment_failed, invoice.upcoming, customer.subscription.updated,
