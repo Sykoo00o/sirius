@@ -99,8 +99,12 @@ async def telegram_webhook(update: dict[str, Any] = Body(...), store: FinanceSto
 - **Implemented:** <what changed, file(s)>
 - **Verified:** <syntax check, systemd restart, API response, etc.>
 -->
-### 2026-11-22 — kegeldoc polish: animated Excellent/Great score, slower analysis, study screens fit one phone screen (local; not yet deployed)
-- **Git commit:** see the commit carrying this entry.
+### 2026-11-22 — kegeldoc polish DEPLOYED, plus a CDN cache fix for stylesheets
+- **Git commit:** `69ed3e4` (polish) and `5a3c2b3` (cache fix), pushed to `origin/main` and pulled on the VPS; `kegeldoc-app` restarted twice, active, `/health` `"failures": 0`.
+- **Found on verify:** Cloudflare served `/static/kegeldoc.css` from cache (`cf-cache-status: HIT`, `max-age=14400`, age ~50 min), so the new markup rendered with the old stylesheet; the previous charts/discount deploy was affected the same way until its cache expired. Fix: `main._asset_version` hashes `kegeldoc.css` + `app.css` at startup and `base.html` links them as `?v=<hash>`, so each deploy that changes CSS gets a fresh URL. Test `test_stylesheet_links_carry_a_content_version`. Routine Lab (`funnel_app`) has the same unversioned links and was not changed.
+- **Verified:** kegeldoc suite 325 passed. Live, through the public hostname: both study screens render with `class="fact study"`; `/analysing` carries the slower pace and a 10 s no-JS refresh; `/compatibility` animates to 96 with "Excellent"; the home page links `kegeldoc.css?v=79c3f024d7`, and that URL serves the new rules (`.fact.study`, `.compat-pct`).
+### 2026-11-22 — kegeldoc polish: animated Excellent/Great score, slower analysis, study screens fit one phone screen (local)
+- **Git commit:** `69ed3e4`.
 - **Implemented:** `main.compatibility` now returns Excellent (96%), or Great (91%) when the plan carries a clinician note (the note still shows); the ring fills over 1.6 s while the percentage counts up from 0, and the word fades in at the end (reduced-motion: static). Analysing bars slowed from ~5 s to ~10 s in total (uneven pace, short beat between bars; no-JS refresh 6 s → 10 s). Study screens (`.fact.study`: Dorey, Pastore, Cochrane charts) tightened so chart, title, text and Continue fit one phone screen. On phone quiz screens the "Rehearsal mode" banner now sits at the end of the page instead of fixed over the sticky Continue button; checkout pages keep it fixed.
 - **Verified:** kegeldoc suite 324 passed (score tests updated to Excellent/Great). Browser at 375×812: Dorey screen Continue ends at 764 px, Pastore at 672 px, no horizontal scroll; at 375×667 the sticky button stays in view (588–652 px); analysis timed at 9.3 s to the last bar, then auto-advance; compatibility counted up (87% mid-way) and settled on 96% Excellent.
 ### 2026-11-22 — kegeldoc charts + 10-minute discount DEPLOYED to `kegeldoc.vegastudios.site`
