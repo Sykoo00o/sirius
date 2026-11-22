@@ -31,6 +31,64 @@ SCALE_VALUES: tuple[str, ...] = ("1", "2", "3", "4", "5")
 
 
 @dataclass(frozen=True)
+class Bar:
+    label: str
+    value: float
+    shown: str
+    #: Bars with the same group render under one heading.
+    group: str = ""
+    #: "accent" for the trained/after result, "muted" for the comparison.
+    tone: str = "accent"
+
+
+@dataclass(frozen=True)
+class Chart:
+    title: str
+    bars: tuple[Bar, ...]
+    #: The value a full-width bar stands for.
+    scale_max: float
+    #: Who was studied and how, so the chart is read as that study and not as a promise.
+    note: str
+
+
+#: Charts for the study screens. Every number is the published figure from the source the screen
+#: cites (checked against the papers on 2026-11-22), rounded only where `shown` says so. A new
+#: chart needs its own source line on the screen that shows it.
+CHARTS: dict[str, Chart] = {
+    # Dorey et al., BJGP 2004;54:819-825, abstract: 22 (40.0%) normal function, 19 (34.5%)
+    # improved, 14 (25.5%) failed to improve, n=55.
+    "dorey": Chart(
+        title="Erection outcome for the 55 men in the trial",
+        bars=(Bar("Normal erectile function", 40.0, "40%"),
+              Bar("Improved", 34.5, "34.5%"),
+              Bar("No improvement", 25.5, "25.5%", tone="muted")),
+        scale_max=100,
+        note="Randomised trial of pelvic floor exercises with a physiotherapist, biofeedback and "
+             "home practice. Results vary from person to person."),
+    # Pastore et al., Ther Adv Urol 2014;6(3):83-88: mean IELT 31.7 s at baseline, 146.2 s
+    # after 12 weeks; 33 of 40 gained control. Uncontrolled.
+    "pastore": Chart(
+        title="Average time to ejaculation, 40 men",
+        bars=(Bar("Before the programme", 31.7, "32 s", tone="muted"),
+              Bar("After 12 weeks", 146.2, "146 s")),
+        scale_max=160,
+        note="Clinic programme of pelvic floor exercises, electrical stimulation and "
+             "biofeedback; 33 of the 40 men gained control. There was no comparison group."),
+    # Dumoulin et al., Cochrane 2018, CD005654: stress incontinence, cure 56% vs 6% (RR 8.38);
+    # cure or improvement 74% vs 11% (RR 6.33).
+    "cochrane": Chart(
+        title="Women with leaks on effort, at the end of training",
+        bars=(Bar("Pelvic floor training", 56, "56%", group="Leaks stopped"),
+              Bar("No training", 6, "6%", group="Leaks stopped", tone="muted"),
+              Bar("Pelvic floor training", 74, "74%", group="Leaks stopped or improved"),
+              Bar("No training", 11, "11%", group="Leaks stopped or improved", tone="muted")),
+        scale_max=100,
+        note="Pooled from randomised trials comparing pelvic floor training with no training. "
+             "Most trials were small and followed women for under a year."),
+}
+
+
+@dataclass(frozen=True)
 class Question:
     key: str
     section: str
@@ -48,6 +106,8 @@ class Question:
     body: str = ""
     source: str = ""
     art: str = "floor"
+    #: Study screens: the key of a chart in `CHARTS`, drawn from the cited paper's own figures.
+    chart: str = ""
     #: Single-choice: render the tall icon rows (the track picker).
     icons: bool = False
     #: Multi-select: the value that clears every other choice ("None of these").
@@ -143,7 +203,7 @@ BANK: tuple[Question, ...] = (
              "Morning erections are a rough sign that blood flow and nerves are working.",
              options=FREQ, show=_men),
     Question("fact_men_erect", "info", "The muscles at the base of the penis help hold an erection",
-             kind="fact", eyebrow="Study fact", art="floor",
+             kind="fact", eyebrow="Study fact", chart="dorey",
              body="Two pelvic floor muscles wrap the root of the penis. When they contract they "
                   "help keep blood in place. Pelvic floor exercise has been tested in a "
                   "randomised trial with men who had erection problems.",
@@ -174,7 +234,7 @@ BANK: tuple[Question, ...] = (
              options=(("yes", "Yes, I'd like that"), ("maybe", "Maybe"),
                       ("no", "It's not a concern")), show=_men),
     Question("fact_men_ejac", "info", "The same muscles are involved in ejaculation",
-             kind="fact", eyebrow="Study fact", art="relax",
+             kind="fact", eyebrow="Study fact", chart="pastore",
              body="Learning to feel, hold and deliberately relax the pelvic floor has been "
                   "studied as a way to build control over timing, with sessions much like the "
                   "ones in your plan.",
@@ -196,7 +256,7 @@ BANK: tuple[Question, ...] = (
              options=(("always", "Yes, every time"), ("sometimes", "Sometimes"), ("no", "No"), SKIP),
              show=_men),
     Question("fact_men_meds", "info", "Exercise works alongside medication, not instead of it",
-             kind="fact", eyebrow="Good to know", art="floor",
+             kind="fact", eyebrow="Good to know", art="meds",
              body="If you take medication, keep taking it the way your doctor told you. Pelvic "
                   "floor exercise is "
                   "something you add. Any change to medication is a conversation with your "
@@ -236,7 +296,7 @@ BANK: tuple[Question, ...] = (
                       ("daily", "Every day"), SKIP),
              show=_women),
     Question("fact_women_leaks", "info", "Two kinds of leaks, two different drills",
-             kind="fact", eyebrow="Good to know", art="relax",
+             kind="fact", eyebrow="Good to know", art="leaks",
              body="Leaks on a cough or a jump happen when the floor is not quick or strong enough "
                   "under sudden pressure. Leaks with a sudden urge are about a bladder that "
                   "squeezes too early. Your plan trains each one differently.",
@@ -272,7 +332,7 @@ BANK: tuple[Question, ...] = (
     Question("libido_w", "sexlife", "How would you rate your sex drive in the last 3 months?",
              "Rate from 1 to 5.", kind="scale", low="Low", high="High", show=_women),
     Question("fact_women_first", "info", "Pelvic floor exercise is a recommended first step for leaks",
-             kind="fact", eyebrow="Study fact", art="floor",
+             kind="fact", eyebrow="Study fact", chart="cochrane",
              body="UK guidance for clinicians recommends at least three months of supervised "
                   "pelvic floor muscle training as the first step for leaks on effort, and a large "
                   "review found women who trained were more likely to report their leaks had "
@@ -287,7 +347,7 @@ BANK: tuple[Question, ...] = (
              options=(("never", "Never"), ("unsure", "Yes, but I'm not sure I did them right"),
                       ("sometimes", "Now and then"), ("regular", "Yes, regularly"))),
     Question("fact_find", "info", "Finding the right muscles", kind="fact", eyebrow="How to",
-             art="floor",
+             art="anatomy",
              body="Imagine stopping yourself passing wind and, at the same time, stopping the flow "
                   "of urine. That squeeze-and-lift is a kegel. Use the image only: stopping urine "
                   "mid-flow as a regular exercise is not recommended."),

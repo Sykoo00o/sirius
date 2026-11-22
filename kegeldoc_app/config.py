@@ -159,6 +159,13 @@ class FunnelSettings:
     #: stays in `trial_amount_minor` and every existing disclosure keeps one source.
     plan_4w_amount_minor: int = 999
     plan_12w_amount_minor: int = 1999
+    #: The paywall's limited-time discount on every plan's first charge, in basis points
+    #: (3550 = 35.5%), and how long it lasts from the visitor's first sight of the paywall.
+    #: The clock is server-side and starts once, so a reload never restarts it, and once it
+    #: runs out the full price is what the page shows and what checkout charges. 0 turns the
+    #: offer off. The monthly rebill is never discounted.
+    intro_discount_bps: int = 3550
+    intro_discount_minutes: int = 10
 
     # ---- save-offer sequence (`LANE_C_PHASE0_STEP1-2.md` §2.3) --------------
     # The three retention options are shown only when the corresponding Stripe object is
@@ -252,6 +259,10 @@ class FunnelSettings:
                                       default=cls.plan_4w_amount_minor),
             plan_12w_amount_minor=_int("FUNNEL_PLAN_12W_AMOUNT_MINOR",
                                        default=cls.plan_12w_amount_minor),
+            intro_discount_bps=_int("FUNNEL_INTRO_DISCOUNT_BPS",
+                                    default=cls.intro_discount_bps),
+            intro_discount_minutes=_int("FUNNEL_INTRO_DISCOUNT_MINUTES",
+                                        default=cls.intro_discount_minutes),
             lite_amount_minor=_int("FUNNEL_LITE_AMOUNT_MINOR", default=cls.lite_amount_minor),
             pause_days=_int("FUNNEL_PAUSE_DAYS", default=cls.pause_days),
             discount_coupon_id=os.getenv("FUNNEL_DISCOUNT_COUPON_ID", "").strip(),

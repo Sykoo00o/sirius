@@ -1,0 +1,27 @@
+{#
+  The limited-time discount banner. `offer` comes from `main.offer_state`, computed on the server
+  from the visitor's stored start time, so the seconds shown are the seconds left on the server's
+  clock and a reload carries on from where it was rather than starting over. When it reaches
+  zero the page reloads, and the server then renders (and charges) the full price.
+#}
+{% if offer and offer.active %}
+<div class="offer-bar" role="timer" aria-live="off" data-remaining="{{ offer.remaining }}">
+  <span class="ob-tag">{{ offer.percent }}% off</span>
+  <span class="ob-text">Your discount is reserved for</span>
+  <span class="ob-clock" aria-label="time left">{{ '%02d:%02d' % (offer.remaining // 60, offer.remaining % 60) }}</span>
+</div>
+<script>
+(function () {
+  var bar = document.currentScript.previousElementSibling;
+  var clock = bar.querySelector('.ob-clock');
+  var end = Date.now() + Number(bar.dataset.remaining) * 1000;
+  function tick() {
+    var left = Math.max(0, Math.round((end - Date.now()) / 1000));
+    clock.textContent = String(Math.floor(left / 60)).padStart(2, '0') + ':' + String(left % 60).padStart(2, '0');
+    if (left <= 0) { clearInterval(timer); bar.classList.add('ended'); bar.querySelector('.ob-text').textContent = 'Discount ended. Updating prices'; setTimeout(function () { location.reload(); }, 1200); }
+  }
+  var timer = setInterval(tick, 1000);
+  tick();
+})();
+</script>
+{% endif %}

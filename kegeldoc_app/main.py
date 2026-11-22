@@ -41,6 +41,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from dataclasses import replace
 from datetime import date
 from types import SimpleNamespace
@@ -71,6 +72,7 @@ from plan_builder import audit_tables as plan_audit_problems
 from profile import is_complete, missing_indices, profile_from_answers
 from quiz import (NOTE_SUFFIX, OPTION_LABELS, QUESTIONS, SECTION_KEYS, SECTION_TITLES,
                   flow_for, next_unanswered, parse_answer, progress_pct)
+from quiz import CHARTS
 from session import COOKIE_NAME, SessionCodec
 from storage import OFFER_ID, ResponseStore
 
@@ -81,6 +83,10 @@ BASE_DIR = Path(__file__).resolve().parent
 
 settings = FunnelSettings.from_env()
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+#: Price formatting for templates, in the app's currency, read at call time so a test that swaps
+#: `settings` gets its own currency.
+templates.env.globals["money"] = lambda minor: money(int(minor), settings.currency)
+templates.env.globals["charts"] = CHARTS
 store = ResponseStore(settings.database_abspath)
 billing_store = BillingStore(settings.billing_database_abspath)
 #: Funnel telemetry lives in the *billing* database file, beside the subscription rows rather
@@ -548,6 +554,40 @@ async def onboarding_submit(
 # ---------------------------------------------------------------------------
 
 EMAIL_KEY = "_email"
+#: When this visitor first saw the paywall (epoch seconds, as a string). The discount clock runs
+#: from here and is written once, so reloading the paywall never restarts it.
+OFFER_KEY = "_offer_started"
+#: A checkout form opened while the discount was on may be submitted this long after the clock
+#: runs out and still get the price it showed. Past that, the visitor is shown the full price
+#: before anything is charged, so the amount charged is always the amount last displayed.
+OFFER_GRACE_SECONDS = 120
+
+
+def _now() -> float:
+    """The clock, as one function so tests can move it."""
+    return time.time()
+
+
+def _offer_started(stored: dict[str, Any]) -> float | None:
+    try:
+        return float((stored.get(OFFER_KEY) or [""])[0])
+    except ValueError:
+        return None
+
+
+def _internal(stored: dict[str, Any]) -> dict[str, Any]:
+    """The internal keys a later step still needs: the email and the discount start."""
+    return {k: stored[k] for k in (EMAIL_KEY, OFFER_KEY) if k in stored}
+
+
+def offer_state(stored: dict[str, Any], *, grace_seconds: float = 0) -> dict[str, Any]:
+    """The discount as the page shows it: on or off, its percent and the seconds left."""
+    started = _offer_started(stored)
+    now = _now()
+    active = plans.offer_active(settings, started, now, grace_seconds=grace_seconds)
+    deadline = plans.offer_deadline(settings, started) if started is not None else 0
+    return {"active": active, "percent": plans.discount_percent(settings),
+            "deadline": int(deadline), "remaining": max(0, int(deadline - now)) if active else 0}
 EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}")
 
 #: The analysis bars, per track. They describe what the builder really reads from the answers,
@@ -662,24 +702,28 @@ async def ready(request: Request) -> HTMLResponse:
         page_context(request, plan=plan, email=_email_of(stored), total=_answer_count(stored)))
 
 
-def plan_cards() -> list[dict[str, Any]]:
+def plan_cards(discounted: bool = False) -> list[dict[str, Any]]:
     """One card per paywall plan, each carrying its own price and renewal disclosures."""
     cards = []
-    for option in plans.options(settings):
+    for option in plans.options(settings, discounted=discounted):
         copy_obj = build_copy(plans.settings_for(settings, option))
         cards.append({
             "option": option,
             "terms": copy_obj,
             "price": copy_obj.trial_amount,
+            "full_price": (money(option.full_minor, settings.currency)
+                           if option.discounted else ""),
             "per_day": money(round(option.per_day_minor()), settings.currency),
             "selected": option.key == plans.DEFAULT_KEY,
         })
     return cards
 
 
-def _plan_copy(key: str | None) -> tuple[plans.PlanOption, Copy] | None:
+def _plan_copy(key: str | None, *, discounted: bool = False
+               ) -> tuple[plans.PlanOption, Copy] | None:
     """The chosen plan and its copy. No key means the 1-week plan; an unknown key means none."""
-    option = plans.find(settings, key) if key else plans.options(settings)[0]
+    option = (plans.find(settings, key, discounted=discounted) if key
+              else plans.options(settings, discounted=discounted)[0])
     if option is None:
         return None
     return option, build_copy(plans.settings_for(settings, option))
@@ -768,6 +812,12 @@ async def preview(request: Request) -> HTMLResponse:
     if not _email_of(stored):
         return RedirectResponse(url="/email", status_code=302)
 
+    if plans.discount_enabled(settings) and _offer_started(stored) is None:
+        # First sight of the paywall starts the discount clock. The `previewed` row below
+        # persists it, and every later read of the paywall uses this one start time.
+        stored[OFFER_KEY] = [f"{_now():.0f}"]
+    offer = offer_state(stored)
+
     plan, coach_source = await build_preview(request)
     copy_obj = build_copy(settings)
     store.append_event(
@@ -789,8 +839,8 @@ async def preview(request: Request) -> HTMLResponse:
             request, copy_obj=copy_obj, plan=plan, profile=profile_from_answers(stored),
             total=_answer_count(stored), locked_weeks=WEEK_ARCS[1:],
             unlock_items=ARTIFACT_PAID, free_items=ARTIFACT_FREE,
-            llm_live=(coach_source == "llm"), cards=plan_cards(),
-            score=compatibility(plan),
+            llm_live=(coach_source == "llm"), cards=plan_cards(offer["active"]),
+            score=compatibility(plan), offer=offer,
         ),
     )
 
@@ -834,11 +884,14 @@ def _renewal_line_for(copy_obj: Copy) -> str:
 async def checkout(request: Request) -> HTMLResponse:
     if blocked := _checkout_gate(request):
         return blocked
-    chosen = _plan_copy(request.query_params.get("plan"))
+    offer = offer_state(answers_for(request))
+    chosen = _plan_copy(request.query_params.get("plan"), discounted=offer["active"])
     if chosen is None:
         return RedirectResponse(url="/preview", status_code=302)
     option, copy_obj = chosen
     plan_signature = profile_from_answers(answers_for(request)).signature()
+    # Set when a submit arrived after the discount ended: the page now shows the full price.
+    price_changed = request.query_params.get("changed") == "1"
 
     store.append_event(
         visitor_key=get_visitor(request),
@@ -858,15 +911,37 @@ async def checkout(request: Request) -> HTMLResponse:
             request, "checkout.html",
             page_context(request, copy_obj=copy_obj, offer_id=OFFER_ID,
                          plan_signature=plan_signature, trust_points=TRUST_POINTS,
-                         unlock_items=ARTIFACT_PAID, option=option),
+                         unlock_items=ARTIFACT_PAID, option=option, offer=offer,
+                         price_changed=price_changed),
         )
     return templates.TemplateResponse(
         request, "checkout_live.html",
         page_context(request, copy_obj=copy_obj, offer_id=OFFER_ID,
                      plan_signature=plan_signature, trust_points=TRUST_POINTS,
                      unlock_items=ARTIFACT_PAID, renewal_line=_renewal_line_for(copy_obj),
-                     email=_email_of(answers_for(request)), error="", option=option),
+                     email=_email_of(answers_for(request)), error="", option=option,
+                     offer=offer, price_changed=price_changed),
     )
+
+
+def _submitted_plan(request: Request, form: Any
+                    ) -> tuple[plans.PlanOption, Copy] | RedirectResponse:
+    """The plan a checkout form asks for, priced by the server, never by the form.
+
+    The discount applies while the clock (plus a short grace) is running. The form carries the
+    amount it displayed; if that is not the amount the server would charge now, nothing is
+    charged and the visitor is sent back to the checkout page showing the current price.
+    """
+    key = str(form.get("plan") or "") or None
+    offer = offer_state(answers_for(request), grace_seconds=OFFER_GRACE_SECONDS)
+    chosen = _plan_copy(key, discounted=offer["active"])
+    if chosen is None:
+        return RedirectResponse(url="/preview", status_code=303)
+    shown = str(form.get("amount") or "").strip()
+    if shown and shown != str(chosen[0].amount_minor):
+        return RedirectResponse(url=f"/checkout?plan={chosen[0].key}&changed=1",
+                                status_code=303)
+    return chosen
 
 
 @app.post("/checkout", response_class=HTMLResponse)
@@ -880,9 +955,9 @@ async def checkout_rehearsal(request: Request) -> HTMLResponse:
     if blocked := _checkout_gate(request):
         return blocked
     form = await request.form()
-    chosen = _plan_copy(str(form.get("plan") or "") or None)
-    if chosen is None:
-        return RedirectResponse(url="/preview", status_code=303)
+    chosen = _submitted_plan(request, form)
+    if isinstance(chosen, RedirectResponse):
+        return chosen
     option, plan_copy = chosen
     if billing_client() is not None:
         return RedirectResponse(url=f"/checkout?plan={option.key}", status_code=303)
@@ -892,7 +967,10 @@ async def checkout_rehearsal(request: Request) -> HTMLResponse:
     store.append_event(
         visitor_key=visitor_key,
         status="started",
-        answers=form_answers(stored),
+        # The email and discount start are kept: this row becomes the visitor's latest
+        # answers, and dropping them would send a returning visitor back to the email screen
+        # and restart a discount clock that has already run.
+        answers={**form_answers(stored), **_internal(stored)},
         step=len(QUESTIONS) + 1,
         plan_source="checkout_intent",
         offer_id=OFFER_ID,
@@ -909,7 +987,8 @@ async def checkout_rehearsal(request: Request) -> HTMLResponse:
                   # crosses both paths on one day is still one committed start.
                   idempotency_key=f"trial_started:{visitor_key}:"
                                   f"{telemetry.day_of(telemetry.utc_now())}",
-                  detail={"live": False, "via": "rehearsal", "plan": option.key})
+                  detail={"live": False, "via": "rehearsal", "plan": option.key,
+                          "discounted": option.discounted})
     return templates.TemplateResponse(
         request, "rehearsal_done.html",
         page_context(request, copy_obj=plan_copy, option=option),
@@ -933,9 +1012,9 @@ async def checkout_start(request: Request) -> HTMLResponse:
         return RedirectResponse(url="/checkout", status_code=303)
 
     form = await request.form()
-    chosen = _plan_copy(str(form.get("plan") or "") or None)
-    if chosen is None:
-        return RedirectResponse(url="/preview", status_code=303)
+    chosen = _submitted_plan(request, form)
+    if isinstance(chosen, RedirectResponse):
+        return chosen
     option, copy_obj = chosen
     email = str(form.get("email") or "").strip()
     if not EMAIL_RE.fullmatch(email):
@@ -946,6 +1025,7 @@ async def checkout_start(request: Request) -> HTMLResponse:
                 plan_signature=profile_from_answers(answers_for(request)).signature(),
                 trust_points=TRUST_POINTS, unlock_items=ARTIFACT_PAID,
                 renewal_line=_renewal_line_for(copy_obj), email=email, option=option,
+                offer=offer_state(answers_for(request)), price_changed=False,
                 error="We need a working email address: the receipt is the record of what "
                       "you agreed to, and it carries your cancel link."),
             status_code=422,
@@ -1588,7 +1668,7 @@ def selfcheck_render() -> dict[str, Any]:
                 profile=profile_from_answers(CHECK_ANSWERS), total=_answer_count(CHECK_ANSWERS),
                 locked_weeks=WEEK_ARCS[1:], unlock_items=ARTIFACT_PAID,
                 free_items=ARTIFACT_FREE, llm_live=False, cards=plan_cards(),
-                score=compatibility(plan),
+                score=compatibility(plan), offer={"active": False},
             ))
         needles = [
             ("Mon", "the first day of week 1"), ("Sun", "the last day of week 1"),

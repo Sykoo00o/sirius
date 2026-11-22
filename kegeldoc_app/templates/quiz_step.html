@@ -19,9 +19,79 @@
   Every screen posts to its own route, so an invalid answer re-renders the page the visitor is on.
 #}
 
+{#
+  Fact-screen visuals. Study screens draw a chart from `quiz.CHARTS`, the cited paper's own
+  figures; the other screens get an illustration. Everything is inline SVG or HTML in the brand
+  palette: no stock photo, no request to another host, nothing that can fail to load.
+#}
+{% macro chart(c) -%}
+<figure class="chart" aria-label="{{ c.title }}">
+  <figcaption class="chart-title">{{ c.title }}</figcaption>
+  {% set ns = namespace(group='') %}
+  {% for bar in c.bars %}
+    {% if bar.group and bar.group != ns.group %}{% set ns.group = bar.group %}<p class="chart-group">{{ bar.group }}</p>{% endif %}
+    <div class="chart-row {{ bar.tone }}">
+      <span class="chart-label">{{ bar.label }}</span>
+      <span class="chart-track"><i style="--w:{{ '%.1f' % (bar.value / c.scale_max * 100) }}%;--d:{{ loop.index0 * 120 }}ms"></i></span>
+      <b class="chart-val">{{ bar.shown }}</b>
+    </div>
+  {% endfor %}
+  <p class="chart-note">{{ c.note }}</p>
+</figure>
+{%- endmacro %}
+
 {% macro art(kind) -%}
-  {%- if kind == 'relax' -%}
-  <svg viewBox="0 0 180 180" aria-hidden="true"><circle cx="90" cy="90" r="80" fill="#f2f8f7"/><path d="M30 100 Q60 60 90 100 T150 100" fill="none" stroke="#0b6f78" stroke-width="8" stroke-linecap="round"/><path d="M30 125 Q60 110 90 125 T150 125" fill="none" stroke="#9fd3cb" stroke-width="8" stroke-linecap="round"/></svg>
+  {%- if kind == 'anatomy' -%}
+  <svg class="illo" viewBox="0 0 320 200" role="img" aria-label="The pelvic floor is a sling of muscle across the base of the pelvis; a kegel lifts it upward">
+    <rect width="320" height="200" rx="20" fill="#f2f8f7"/>
+    <path d="M60 46 C60 120 110 150 160 150 C210 150 260 120 260 46" fill="none" stroke="#cfe6e2" stroke-width="18" stroke-linecap="round"/>
+    <path d="M70 52 C74 112 116 136 160 136 C204 136 246 112 250 52" fill="none" stroke="#e9f3f1" stroke-width="6" stroke-linecap="round"/>
+    <path class="sling" d="M92 128 Q160 176 228 128" fill="none" stroke="#0b6f78" stroke-width="12" stroke-linecap="round"/>
+    <path class="sling lifted" d="M92 128 Q160 146 228 128" fill="none" stroke="#e8735a" stroke-width="5" stroke-linecap="round" stroke-dasharray="6 7"/>
+    <g fill="#e8735a"><path d="M128 182 l8 -14 l8 14 z"/><path d="M152 186 l8 -14 l8 14 z"/><path d="M176 182 l8 -14 l8 14 z"/></g>
+    <text x="160" y="30" text-anchor="middle" font-size="13" font-weight="700" fill="#0b6f78">Pelvis</text>
+    <text x="246" y="170" font-size="12" font-weight="700" fill="#0b6f78">Pelvic floor</text>
+    <text x="24" y="170" font-size="12" font-weight="700" fill="#e8735a">Squeeze + lift</text>
+  </svg>
+  {%- elif kind == 'leaks' -%}
+  <svg class="illo" viewBox="0 0 320 200" role="img" aria-label="Two kinds of leaks: on effort, sudden pressure pushes down; with urgency, the bladder squeezes too early">
+    <rect x="0" y="0" width="154" height="200" rx="18" fill="#f2f8f7"/>
+    <rect x="166" y="0" width="154" height="200" rx="18" fill="#fdf1ed"/>
+    <text x="77" y="28" text-anchor="middle" font-size="13" font-weight="700" fill="#0b6f78">On effort</text>
+    <text x="77" y="46" text-anchor="middle" font-size="11" fill="#4b5b5e">cough, laugh, jump</text>
+    <g fill="none" stroke="#0b6f78" stroke-width="4" stroke-linecap="round"><path d="M57 62 v22 m-7 -8 l7 8 l7 -8"/><path d="M77 58 v26 m-7 -8 l7 8 l7 -8"/><path d="M97 62 v22 m-7 -8 l7 8 l7 -8"/></g>
+    <ellipse cx="77" cy="122" rx="38" ry="26" fill="#cfe6e2"/>
+    <path d="M45 160 Q77 172 109 160" fill="none" stroke="#0b6f78" stroke-width="7" stroke-linecap="round"/>
+    <text x="77" y="190" text-anchor="middle" font-size="11" fill="#4b5b5e">Quick, strong squeezes</text>
+    <text x="243" y="28" text-anchor="middle" font-size="13" font-weight="700" fill="#c0573f">With urgency</text>
+    <text x="243" y="46" text-anchor="middle" font-size="11" fill="#4b5b5e">a sudden need to go</text>
+    <ellipse cx="243" cy="112" rx="36" ry="34" fill="#f6d3c8"/>
+    <g fill="none" stroke="#e8735a" stroke-width="3" stroke-linecap="round"><path d="M195 92 q-8 20 0 40"/><path d="M291 92 q8 20 0 40"/><path d="M185 86 q-12 26 0 52"/><path d="M301 86 q12 26 0 52"/></g>
+    <path d="M211 160 Q243 172 275 160" fill="none" stroke="#c0573f" stroke-width="7" stroke-linecap="round"/>
+    <text x="243" y="190" text-anchor="middle" font-size="11" fill="#4b5b5e">Calm the urge first</text>
+  </svg>
+  {%- elif kind == 'meds' -%}
+  <svg class="illo" viewBox="0 0 320 180" role="img" aria-label="Your medication plus daily kegels: exercise is added, nothing is replaced">
+    <rect width="320" height="180" rx="20" fill="#f2f8f7"/>
+    <g transform="translate(46 58) rotate(-30 40 22)"><rect width="80" height="44" rx="22" fill="#fff" stroke="#0b6f78" stroke-width="3"/><path d="M40 0 h18 a22 22 0 0 1 0 44 h-18 z" fill="#0b6f78"/></g>
+    <text x="88" y="140" text-anchor="middle" font-size="12" font-weight="700" fill="#0b6f78">Your medication</text>
+    <circle cx="160" cy="82" r="18" fill="#e8735a"/><path d="M151 82 h18 M160 73 v18" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
+    <path d="M196 92 q10 -34 20 0 t20 0 t20 0 t20 0" fill="none" stroke="#0b6f78" stroke-width="5" stroke-linecap="round"/>
+    <text x="236" y="140" text-anchor="middle" font-size="12" font-weight="700" fill="#0b6f78">Daily kegels</text>
+    <text x="160" y="166" text-anchor="middle" font-size="11" fill="#4b5b5e">Added alongside. Nothing replaced.</text>
+  </svg>
+  {%- elif kind == 'relax' -%}
+  <svg class="illo" viewBox="0 0 320 170" role="img" aria-label="Each rep is a squeeze followed by a release at least as long">
+    <rect width="320" height="170" rx="20" fill="#f2f8f7"/>
+    <text x="24" y="32" font-size="12" font-weight="700" fill="#0b6f78">One minute of reps</text>
+    {% for i in range(4) %}
+      <rect class="rep sq" x="{{ 24 + i * 70 }}" y="52" width="32" height="70" rx="8" fill="#0b6f78" style="--d:{{ i * 160 }}ms"/>
+      <rect class="rep rl" x="{{ 58 + i * 70 }}" y="102" width="32" height="20" rx="6" fill="#9fd3cb" style="--d:{{ i * 160 + 80 }}ms"/>
+    {% endfor %}
+    <line x1="20" y1="124" x2="300" y2="124" stroke="#cfe6e2" stroke-width="2"/>
+    <rect x="24" y="140" width="12" height="12" rx="3" fill="#0b6f78"/><text x="42" y="150" font-size="11" fill="#4b5b5e">Squeeze</text>
+    <rect x="104" y="140" width="12" height="12" rx="3" fill="#9fd3cb"/><text x="122" y="150" font-size="11" fill="#4b5b5e">Let go, at least as long</text>
+  </svg>
   {%- else -%}
   <svg viewBox="0 0 180 180" aria-hidden="true"><circle cx="90" cy="90" r="80" fill="#f2f8f7"/><path d="M38 70 Q90 150 142 70" fill="none" stroke="#0b6f78" stroke-width="12" stroke-linecap="round"/><path d="M52 66 Q90 128 128 66" fill="none" stroke="#9fd3cb" stroke-width="6" stroke-linecap="round"/><circle cx="90" cy="62" r="16" fill="#e8735a" opacity=".85"/></svg>
   {%- endif -%}
@@ -55,7 +125,7 @@
 
   {% if question.kind == 'fact' %}
     <div class="fact">
-      <div class="art">{{ art(question.art) }}</div>
+      {% if question.chart %}{{ chart(charts[question.chart]) }}{% else %}<div class="art{% if question.art != 'floor' %} wide{% endif %}">{{ art(question.art) }}</div>{% endif %}
       <span class="eyebrow">{{ question.eyebrow }}</span>
       <h1 class="fact-title">{{ question.title }}</h1>
       <p>{{ question.body }}</p>

@@ -21,6 +21,10 @@
 
   <p class="eyebrow mt-5">No charge yet in rehearsal</p>
   <h1 class="band-heading mt-4">Your {{ option.name }}</h1>
+  {% if price_changed %}
+    <p role="alert" class="offer-ended mt-4">The {{ offer.percent }}% discount ended before you paid, so this page now shows the full price. Nothing has been charged.</p>
+  {% endif %}
+  {% if option.discounted %}<div class="mt-4">{% include "_offer_timer.html" %}<p class="offer-was">{{ offer.percent }}% off this plan's usual first charge of <s>{{ money(option.full_minor) }}</s>. The monthly price after it is not discounted.</p></div>{% endif %}
   <p class="mt-2 text-muted leading-relaxed">
     Your plan reference is <code class="rounded bg-cream border border-line px-1.5 py-0.5 text-sm">{{ plan_signature }}</code>,
     so this screen and the preview are provably the same plan.
@@ -28,6 +32,7 @@
 
   <form method="post" class="mt-7 space-y-4" novalidate>
     <input type="hidden" name="plan" value="{{ option.key }}">
+    <input type="hidden" name="amount" value="{{ option.amount_minor }}">
 
     {# --- price block: checklist slots 1-4, adjacent to the card field --- #}
     <div data-section="price-block" class="rounded-3xl border-2 border-ember/40 bg-ember-soft p-6 sm:p-7 shadow-[0_4px_14px_rgba(232,89,12,0.10)]">

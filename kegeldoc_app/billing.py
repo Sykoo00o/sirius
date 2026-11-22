@@ -285,6 +285,9 @@ class BillingService:
         option = option or plans.options(self.settings)[0]
         metadata = {
             "plan_option": option.key,
+            # "1" when the limited-time discount priced this session, so completion records
+            # the discounted entry amount the processor actually charged.
+            "plan_discounted": "1" if option.discounted else "0",
             "visitor_key": visitor_key,
             "plan_signature": plan_signature,
             "offer_id": self.settings.brand_name,
@@ -317,6 +320,7 @@ class BillingService:
         subscription: dict[str, Any] = {}
         session: dict[str, Any] = {}
 
+        discounted = False
         if self.client is not None and session_id:
             session = self.client.get(f"/checkout/sessions/{session_id}")
             reference = str(session.get("client_reference_id") or "")
@@ -336,9 +340,12 @@ class BillingService:
             if details:
                 email = details
             # The processor's record of which plan was sold beats the browser's claim.
-            plan_key = str((session.get("metadata") or {}).get("plan_option") or plan_key)
+            metadata = session.get("metadata") or {}
+            plan_key = str(metadata.get("plan_option") or plan_key)
+            discounted = str(metadata.get("plan_discounted") or "") == "1"
 
-        option = plans.find(self.settings, plan_key) or plans.options(self.settings)[0]
+        option = (plans.find(self.settings, plan_key, discounted=discounted)
+                  or plans.options(self.settings)[0])
 
         trial_end_iso = epoch_to_iso(subscription.get("trial_end")
                                      or self.checkout_trial_end_epoch(option.days))

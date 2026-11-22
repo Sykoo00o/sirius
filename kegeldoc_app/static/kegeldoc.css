@@ -458,3 +458,38 @@ html.js .autosubmit-cta { display: none; }
 .plan-pick .btn-cta { width: 100%; margin-top: 18px; }
 .po-cancel { margin-top: 10px; font-size: 13px; color: var(--ink-60); text-align: center; }
 @media (prefers-reduced-motion: reduce) { .welcome-art, .compat-ring .arc { animation: none; } }
+
+/* ---------- fact screens: study charts and illustrations ---------- */
+.fact .art.wide { width: 100%; height: auto; max-width: 360px; }
+.illo { display: block; width: 100%; height: auto; }
+.illo .rep { transform-box: fill-box; transform-origin: bottom; animation: rep-in .5s var(--ease) both; animation-delay: var(--d, 0ms); }
+.illo .sling.lifted { animation: lift 2.4s var(--ease) infinite alternate; }
+@keyframes rep-in { from { transform: scaleY(0); } }
+@keyframes lift { from { transform: translateY(14px); opacity: .4; } to { transform: none; opacity: 1; } }
+.chart { margin: 0 0 22px; padding: 18px 16px 14px; background: var(--band); border-radius: 18px; text-align: left; }
+.chart-title { font-weight: 700; font-size: 15px; line-height: 20px; margin-bottom: 12px; }
+.chart-group { margin: 12px 0 4px; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-60); }
+.chart-row { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; margin-bottom: 10px; }
+.chart-label { font-size: 13px; color: var(--ink); }
+.chart-val { font-size: 15px; font-variant-numeric: tabular-nums; color: var(--teal); }
+.chart-row.muted .chart-val { color: var(--ink-60); }
+.chart-track { grid-column: 1 / -1; grid-row: 2; height: 12px; border-radius: 99px; background: #fff; overflow: hidden; }
+.chart-track i { display: block; height: 100%; width: var(--w); border-radius: inherit; background: var(--grad); transform-origin: left; animation: bar-grow .9s var(--ease) both; animation-delay: var(--d); }
+.chart-row.muted .chart-track i { background: #b9c6c9; }
+.chart-note { margin: 8px 0 0; font-size: 12px; line-height: 17px; color: var(--ink-60); }
+@keyframes bar-grow { from { transform: scaleX(0); } }
+
+/* ---------- paywall: limited-time discount ---------- */
+.offer-bar { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; padding: 10px 14px; border-radius: 14px; background: #fdf1ed; color: var(--ink); font-size: 14px; position: sticky; top: 8px; z-index: 5; box-shadow: 0 1px 0 rgba(0,0,0,.04), 0 6px 18px rgba(232,115,90,.12); }
+.ob-tag { flex: none; padding: 3px 8px; border-radius: 99px; background: var(--coral); color: #fff; font-weight: 700; font-size: 12px; }
+.ob-text { flex: 1; min-width: 0; }
+.ob-clock { flex: none; font-weight: 800; font-size: 18px; font-variant-numeric: tabular-nums; color: #c0573f; }
+.offer-bar.ended { background: var(--band); }
+.offer-bar.ended .ob-clock { color: var(--ink-60); }
+.po-was { color: var(--ink-60); font-weight: 400; margin-right: 2px; }
+.offer-was { margin: 8px 0 0; font-size: 13px; color: var(--ink-60); }
+.offer-ended { padding: 10px 14px; border-radius: 12px; background: #fff7e6; font-size: 14px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .illo .rep, .illo .sling.lifted, .chart-track i { animation: none; }
+}

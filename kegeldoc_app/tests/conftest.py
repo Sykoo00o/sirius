@@ -438,6 +438,25 @@ def make_client(env: dict[str, str]) -> TestClient:
         return attach(TestClient(main.app), main)
 
 
+@pytest.fixture(autouse=True)
+def _no_intro_discount(monkeypatch):
+    """The suite prices plans at their full amounts unless a test opts in.
+
+    The paywall's limited-time discount starts on first sight of `/preview`, which every full
+    walk reaches, so leaving it on would make every pricing assertion depend on a clock. The
+    discount's own tests use `discount_client`, which turns it back on.
+    """
+    monkeypatch.setenv("FUNNEL_INTRO_DISCOUNT_BPS", "0")
+
+
+@pytest.fixture()
+def discount_client(request, monkeypatch):
+    """`client`, with the 35.5% ten-minute discount on."""
+    monkeypatch.setenv("FUNNEL_INTRO_DISCOUNT_BPS", "3550")
+    monkeypatch.setenv("FUNNEL_INTRO_DISCOUNT_MINUTES", "10")
+    return request.getfixturevalue("client")
+
+
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     """The funnel as it boots today: charges off, no funnel key, throwaway databases.

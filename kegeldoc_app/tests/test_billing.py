@@ -906,6 +906,31 @@ def test_a_twelve_week_plan_is_priced_and_recorded_as_twelve_weeks(live):
     assert money(twelve.amount_minor, settings.currency) in dashboard
 
 
+def test_live_checkout_charges_the_discounted_amount_and_records_it(request, monkeypatch):
+    monkeypatch.setenv("FUNNEL_INTRO_DISCOUNT_BPS", "3550")
+    live = request.getfixturevalue("live")
+    import plans
+    from funnel_copy import money  # noqa: F401
+    settings = live.main.settings
+    cut = plans.find(settings, "4w", discounted=True)
+    live.fake().reset()
+    live.get("/")
+    walk(live)
+    live.get("/preview")
+    started = post(live, "/checkout/start", [("email", "payer@example.com"), ("plan", "4w"),
+                                             ("amount", str(cut.amount_minor))])
+    assert started.status_code == 303, started.text[:600]
+    sent = live.fake().session_request
+    amounts = [line["price_data"]["unit_amount"] for line in sent["line_items"]]
+    assert cut.amount_minor in amounts and cut.full_minor not in amounts, amounts
+    assert sent["metadata"]["plan_discounted"] == "1"
+    session_id = started.headers["location"].rsplit("/", 1)[-1]
+    assert live.get(f"/checkout/complete?session_id={session_id}").status_code == 200
+    row = live.main.billing_store.get_subscription(visitor_of(live))
+    assert row["trial_amount_minor"] == cut.amount_minor
+    assert row["rebill_amount_minor"] == settings.rebill_amount_minor
+
+
 def test_an_unknown_plan_never_reaches_the_processor(live):
     live.fake().reset()
     live.get("/")

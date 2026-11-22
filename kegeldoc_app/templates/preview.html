@@ -39,6 +39,7 @@
   {% set cancel_line = copy.disclosure('cancel_line') %}
   <section data-section="preview-ask" id="plans" class="plan-pick" aria-labelledby="pick-h">
     <h2 id="pick-h" class="sec-title">Choose your plan</h2>
+    {% include "_offer_timer.html" %}
     <form method="get" action="/checkout">
       <div class="plan-opts" role="radiogroup" aria-labelledby="pick-h">
       {% for card in cards %}
@@ -46,7 +47,7 @@
           <input type="radio" name="plan" value="{{ card.option.key }}"{% if card.selected %} checked{% endif %}>
           {% if card.option.popular %}<span class="po-tag">Most popular</span>{% endif %}
           <span class="po-dot" aria-hidden="true"></span>
-          <span class="po-main"><b>{{ card.option.name }}</b><small>{{ card.price }} for {{ card.option.weeks }} week{{ 's' if card.option.weeks > 1 }}</small></span>
+          <span class="po-main"><b>{{ card.option.name }}</b><small>{% if card.full_price %}<s class="po-was">{{ card.full_price }}</s> {% endif %}{{ card.price }} for {{ card.option.weeks }} week{{ 's' if card.option.weeks > 1 }}</small></span>
           <span class="po-day"><b>{{ card.per_day }}</b><small>per day</small></span>
           <span class="po-terms">{{ card.terms.disclosure('price_line') }}. {{ card.terms.disclosure('renewal_line') }} {{ card.terms.disclosure('refund_line') }}</span>
         </label>
