@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Your plan quiz · Floorwise</title>
+  <meta name="theme-color" content="#f4f6f6">
+  <meta name="robots" content="noindex">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g'%3E%3Cstop offset='0' stop-color='%230b6f78'/%3E%3Cstop offset='1' stop-color='%23157a5a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='16' cy='16' r='16' fill='url(%23g)'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='white' stroke-width='3'/%3E%3C/svg%3E">
+</head>
+<body class="quiz-body">
+
+<div class="quiz-top">
+  <div class="inner">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <a class="logo" href="index.html" style="font-size:18px"><span class="logo-mark" aria-hidden="true" style="width:26px;height:26px"></span>Floorwise</a>
+      <span class="muted" style="font-size:13px;font-weight:600" id="section-label"></span>
+    </div>
+    <div class="bar-row" id="bar-row">
+      <button class="icon-btn" id="back" type="button" aria-label="Previous question">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Quiz progress"><i id="bar"></i></div>
+      <span class="step-count" id="count"></span>
+    </div>
+  </div>
+</div>
+
+<main class="quiz-main" id="app" aria-live="polite"></main>
+<div class="toast" id="toast" role="status"></div>
+
+<noscript><p class="quiz-main">This quiz needs JavaScript to build your plan.</p></noscript>
+<script src="quiz.js"></script>
+</body>
+</html>
