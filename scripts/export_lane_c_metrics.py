@@ -8,6 +8,7 @@ Usage:
     python3 scripts/export_lane_c_metrics.py --since 2026-11-01   # backfill every day
     python3 scripts/export_lane_c_metrics.py --day 2026-11-20 --stdout
     python3 scripts/export_lane_c_metrics.py --day 2026-11-20 --json
+    python3 scripts/export_lane_c_metrics.py --since 2026-11-01 --by-ad   # per-ad, read-only
 
 Column order and spelling match `LANE_C_PHASE0_STEP1-2.md` §3.4 exactly, including its two
 near-synonyms (`trial_paid` singular and `paid_conversions` plural), because the sheet the
@@ -1252,6 +1253,116 @@ def export_day(day: str, csv_path: Path, config_module: Any, storage_module: Any
     return row, detail
 
 
+# ---------------------------------------------------------------------------
+# By-ad breakdown (read-only; never touches the sheet)
+# ---------------------------------------------------------------------------
+
+#: Bucket label for visitors whose attributing `lp_view` carried no `utm_content`. Spelled with
+#: parentheses so it cannot collide with a real variant code.
+UNTAGGED = "(untagged)"
+
+#: Funnel steps counted per ad as *distinct visitors*, in funnel order, so a row reads left to
+#: right the way the sheet does.
+AD_STEPS = ("lp_view", "quiz_started", "quiz_completed", "checkout_viewed",
+            "trial_started", "trial_paid")
+
+
+def _utm_of(row: sqlite3.Row, has_detail: bool) -> dict[str, str]:
+    if not has_detail:
+        return {}
+    try:
+        utm = json.loads(row["detail_json"] or "{}").get("utm") or {}
+    except (ValueError, AttributeError):
+        return {}
+    return {k: str(v) for k, v in utm.items()} if isinstance(utm, dict) else {}
+
+
+def ad_breakdown(billing_path: Path, since: str, until: str) -> dict[str, Any]:
+    """Funnel counts per ad variant over `[since, until]`, joined on `visitor_key`.
+
+    Attribution is first touch inside the window: a visitor belongs to the `utm_content` of
+    their earliest `lp_view` in it, and only their events at or after that view count. A
+    visitor with no `lp_view` in the window (a webhook for someone who landed last week) is
+    not attributed at all rather than guessed into a bucket, and the count of such rows is
+    returned as `unattributed_events` so the gap is visible. Events after `until` are outside
+    the window, so a rebill next month is not in this month's row: read paid and revenue as
+    "within the window", not lifetime value.
+
+    Money is captured `amount_minor` on `trial_paid` + `rebill_succeeded`; refunds and disputes
+    are counted the same way so an ad that converts and then disputes is visible as both. No
+    ratio here is a ceiling check; the daily sheet stays the place for those.
+    """
+    conn = open_read_only(billing_path)
+    if conn is None:
+        raise FileNotFoundError(f"no funnel billing database at {billing_path}")
+    try:
+        has_detail = "detail_json" in table_columns(conn, "trial_events")
+        rows = conn.execute(
+            "select * from trial_events where occurred_at >= ? and occurred_at < ? "
+            "order by occurred_at, id", (since, _next_day(until))).fetchall()
+    finally:
+        conn.close()
+    first_touch: dict[str, tuple[str, dict[str, str]]] = {}
+    for row in rows:
+        visitor = row["visitor_key"]
+        if row["event"] == "lp_view" and visitor and visitor not in first_touch:
+            first_touch[visitor] = (row["occurred_at"], _utm_of(row, has_detail))
+
+    def blank(utm: dict[str, str]) -> dict[str, Any]:
+        out: dict[str, Any] = {"utm_content": utm.get("utm_content", UNTAGGED),
+                               "utm_campaign": utm.get("utm_campaign", ""),
+                               "utm_source": utm.get("utm_source", "")}
+        out.update({step: set() for step in AD_STEPS})
+        out.update(revenue_minor=0, refunds_count=0, refund_minor=0, disputes_count=0)
+        return out
+
+    buckets: dict[str, dict[str, Any]] = {}
+    unattributed = 0
+    for row in rows:
+        touch = first_touch.get(row["visitor_key"])
+        if touch is None or row["occurred_at"] < touch[0]:
+            unattributed += row["event"] != "lp_view"
+            continue
+        utm = touch[1]
+        key = utm.get("utm_content", UNTAGGED)
+        bucket = buckets.setdefault(key, blank(utm))
+        event = row["event"]
+        if event in AD_STEPS:
+            bucket[event].add(row["visitor_key"])
+        if event in ("trial_paid", "rebill_succeeded"):
+            bucket["revenue_minor"] += int(row["amount_minor"] or 0)
+        elif event == "refund_issued":
+            bucket["refunds_count"] += 1
+            bucket["refund_minor"] += int(row["amount_minor"] or 0)
+        elif event == "dispute_created":
+            bucket["disputes_count"] += 1
+
+    ads = []
+    for bucket in buckets.values():
+        for step in AD_STEPS:
+            bucket[step] = len(bucket[step])
+        bucket["lp_to_trial_pct"] = pct(bucket["trial_started"], bucket["lp_view"])
+        bucket["trial_to_paid_pct"] = pct(bucket["trial_paid"], bucket["trial_started"])
+        ads.append(bucket)
+    ads.sort(key=lambda b: (b["utm_content"] == UNTAGGED, -b["lp_view"], b["utm_content"]))
+    return {"since": since, "until": until, "ads": ads,
+            "unattributed_events": unattributed, "utm_recorded": has_detail}
+
+
+def _print_ad_breakdown(result: dict[str, Any]) -> None:
+    print(f"\nby ad  {result['since']} .. {result['until']}  (first touch, window only)")
+    print(f"  {'utm_content':<40} {'lp':>5} {'quiz':>5} {'done':>5} {'trial':>6} {'paid':>5}"
+          f" {'rev':>8} {'refund':>6} {'disp':>5} {'lp→trial%':>10}")
+    for ad in result["ads"]:
+        print(f"  {ad['utm_content'][:40]:<40} {ad['lp_view']:>5} {ad['quiz_started']:>5}"
+              f" {ad['quiz_completed']:>5} {ad['trial_started']:>6} {ad['trial_paid']:>5}"
+              f" {ad['revenue_minor']:>8} {ad['refunds_count']:>6} {ad['disputes_count']:>5}"
+              f" {ad['lp_to_trial_pct'] or '-':>10}")
+    if result["unattributed_events"]:
+        print(f"  ! {result['unattributed_events']} event(s) from visitors with no landing view "
+              f"in this window are not attributed")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Export Lane C's Day-1 metrics row(s) from the funnel's own event rows.")
@@ -1276,6 +1387,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="skip the best-effort Stripe cross-check (no network)")
     parser.add_argument("--fail-on-ceiling", action="store_true",
                         help="exit 2 if the dispute+CB or fraud ceiling is breached")
+    parser.add_argument("--by-ad", action="store_true",
+                        help="print funnel counts per utm_content over the window instead of "
+                             "exporting; read-only, the sheet is not written")
     args = parser.parse_args(argv)
 
     config_module, storage_module = _load_funnel_config()
@@ -1316,6 +1430,20 @@ def main(argv: list[str] | None = None) -> int:
     days = ([day_arg] if day_arg
             else daterange(since_arg, until_arg or utc_today()) if since_arg
             else [utc_today()])
+
+    if args.by_ad:
+        settings = config_module.FunnelSettings.from_env()
+        try:
+            result = ad_breakdown(db_paths(config_module, settings)["billing"],
+                                  days[0], days[-1])
+        except FileNotFoundError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False))
+        else:
+            _print_ad_breakdown(result)
+        return 0
 
     breaches: list[str] = []
     for day in days:

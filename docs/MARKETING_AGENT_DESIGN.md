@@ -146,7 +146,12 @@ in the app's `quiz.QUESTIONS`, and its `options` must be a subset of that questi
   funnels keep the five `utm_*` keys (cleaned, 100 characters each, click ids such as `fbclid` dropped)
   in `lp_view`'s `detail_json` via `telemetry.attribution_from_query`; `visitor_key` then joins that
   arrival to the same visitor's `trial_started` / `trial_paid` rows. First touch per visitor per UTC
-  day, because `lp_view` is deduped on that key.
+  day, because `lp_view` is deduped on that key. `python -m marketing_agent attribution [--since
+  7daysago] [--until today]` reads that back through `scripts/export_lane_c_metrics.py --by-ad --json`
+  (read-only; no sheet is written): per `utm_content` the distinct visitors at each step, `trial_paid`,
+  captured revenue, refunds and disputes, first touch inside the window, events after `--until`
+  excluded. Each row is marked `known_variant` / `brief_id` from this agent's planned variants;
+  visitors with no landing view in the window are counted in `unattributed_events`, never guessed.
 * **LLM:** when enabled, hooks are drafted through `backend/llm_router.py` loaded by file path, same as
   `llm_flavour.py`; output passes the same gate. Not wired in v1 (`MARKETING_LLM_ENABLED` has no effect
   beyond `status`).
@@ -163,8 +168,9 @@ in the app's `quiz.QUESTIONS`, and its `options` must be a subset of that questi
 
 ## 9. Open items outside this scaffold
 
-* Attribution is captured but not yet reported: neither `scripts/export_lane_c_metrics.py` nor this
-  agent groups trials by `utm_content` yet.
+* By-ad numbers are funnel-side only: `attribution` reports visitors, trials, paid and captured revenue
+  per `utm_content`, but does not join Meta spend, so per-ad ROAS from the funnel's own revenue is
+  not computed yet (needs the variant code carried on each Insights row).
 * No systemd unit yet; when a schedule is wanted, copy the metrics-timer pattern with
   `StateDirectory=marketing-agent` and `MARKETING_DB_PATH=/var/lib/marketing-agent/marketing.sqlite3`.
 * Register handle `marketing` in `engine.agents` before it ever calls the finance gate.

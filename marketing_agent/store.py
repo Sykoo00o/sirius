@@ -209,6 +209,12 @@ class MarketingStore:
                    values (?, ?, ?, ?)""", (variant_code, bid, asset_type, utc_now()))
             return cur.rowcount > 0
 
+    def variant(self, variant_code: str) -> dict[str, Any] | None:
+        with self._lock, self._connect() as conn:
+            row = conn.execute("select * from asset_variants where variant_code = ?",
+                               (variant_code,)).fetchone()
+            return dict(row) if row else None
+
     def variants(self, bid: str) -> list[dict[str, Any]]:
         with self._lock, self._connect() as conn:
             return [dict(r) for r in conn.execute(

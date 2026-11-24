@@ -7,6 +7,7 @@
     python -m marketing_agent brief show BRIEF_ID
     python -m marketing_agent patterns ingest FILE [--min-days 30]
     python -m marketing_agent funnel-health [--day yesterday]
+    python -m marketing_agent attribution [--since 7daysago] [--until today]
     python -m marketing_agent telemetry evaluate FILE [--day yesterday] [--skip-funnel]
 
 Exit codes: 0 ok, 1 flagged / refused / error, 2 the funnel tripped a kill metric (same meaning as
@@ -81,6 +82,20 @@ class Agent:
                 "variants_planned": planned, "landing_urls": urls, "rendered": False,
                 "note": "rendering and upload are not built; variants are PLANNED only"}
 
+    def attribution(self, *, since: str, until: str) -> dict[str, Any]:
+        """Funnel counts per ad, each row marked with the brief that planned its variant code.
+
+        A `utm_content` this agent never planned is kept and marked `known_variant: False`: it is
+        a hand-tagged link or a typo, and either way the operator should see it, not lose it.
+        """
+        result = funnel_metrics.by_ad(self.settings, since, until)
+        for ad in result.get("ads", []):
+            variant = self.store.variant(ad["utm_content"])
+            ad["known_variant"] = variant is not None
+            ad["brief_id"] = variant["brief_id"] if variant else ""
+            ad["asset_type"] = variant["asset_type"] if variant else ""
+        return result
+
     def evaluate_telemetry(self, path: Path, *, day: str, skip_funnel: bool) -> dict[str, Any]:
         health = None if skip_funnel else funnel_metrics.snapshot(self.settings, day)
         halt = "; ".join(health.reasons) if health and health.halt_scaling else ""
@@ -122,6 +137,9 @@ def main(argv: list[str] | None = None) -> int:
     ingest.add_argument("--min-days", type=int, default=30)
     health = sub.add_parser("funnel-health")
     health.add_argument("--day", default="yesterday")
+    attribution = sub.add_parser("attribution")
+    attribution.add_argument("--since", default="7daysago")
+    attribution.add_argument("--until", default="today")
     telemetry = sub.add_parser("telemetry").add_subparsers(dest="action", required=True)
     evaluate = telemetry.add_parser("evaluate")
     evaluate.add_argument("file", type=Path)
@@ -155,6 +173,10 @@ def main(argv: list[str] | None = None) -> int:
         result = agent.approve(args.brief_id, args.actor)
         _print(result)
         return 0 if result["approved"] else 1
+    if args.command == "attribution":
+        result = agent.attribution(since=args.since, until=args.until)
+        _print(result)
+        return 0 if result.get("available") else 1
     if args.command == "patterns":
         _print(adspy.ingest_file(args.file, agent.store, min_days_active=args.min_days))
         return 0

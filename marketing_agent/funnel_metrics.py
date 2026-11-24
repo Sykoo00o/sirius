@@ -78,3 +78,24 @@ def snapshot(settings: MarketingSettings, day: str = "yesterday", *,
         return FunnelHealth(day=day, available=False, halt_scaling=False, reasons=(reason,))
     payload = json.loads(lines[-1])
     return evaluate(payload.get("day", day), payload, settings)
+
+
+def by_ad(settings: MarketingSettings, since: str = "7daysago", until: str = "today", *,
+          env: dict[str, str] | None = None, timeout: int = 120) -> dict[str, Any]:
+    """Per-`utm_content` funnel counts from the export script's read-only `--by-ad` mode.
+
+    Same reuse rule as `snapshot`: the attribution logic (first touch inside the window, joined on
+    `visitor_key`) lives in the script, so the agent and the operator read the same numbers. The
+    script writes nothing in this mode. Returns `{"available": False, "reason": ...}` when the
+    funnel has no database rather than raising.
+    """
+    run_env = {**os.environ, **(env or {}), "FUNNEL_APP_DIR": str(settings.app_dir)}
+    completed = subprocess.run(
+        [sys.executable, str(EXPORT_SCRIPT), "--since", since, "--until", until, "--by-ad",
+         "--json", "--offline"],
+        capture_output=True, text=True, timeout=timeout, env=run_env, check=False)
+    lines = [line for line in completed.stdout.splitlines() if line.startswith("{")]
+    if completed.returncode != 0 or not lines:
+        return {"available": False,
+                "reason": (completed.stderr.strip() or "no output from the export")[:300]}
+    return {"available": True, **json.loads(lines[-1])}
