@@ -95,6 +95,40 @@ AGENT_NOTABLE_EVENTS = (
 #: indicator, so the safe default is "unknown", never "clean".
 CARD_FUNDING_TYPES = ("credit", "debit", "prepaid", "unknown", "")
 
+
+#: Ad attribution, captured on `lp_view` only and stored in its `detail_json`, so no column
+#: changes and the engine-parity columns stay untouched. The five standard `utm_*` keys and
+#: nothing else: a click id such as `fbclid` or `gclid` identifies one person's click rather
+#: than an ad, and the sheet never needs it. The join is `visitor_key`: an `lp_view` carrying
+#: `utm_content=<variant_code>` ties that visitor's later `trial_started` / `trial_paid` rows to
+#: the ad variant that brought them. First touch per visitor per UTC day, because `lp_view` is
+#: deduped on that key: a visitor who arrives organically and clicks an ad later the same day
+#: keeps the organic (empty) attribution.
+UTM_KEYS = ("utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term")
+
+#: Per-value cap. A query string is attacker-controlled and lands in a row the export reads,
+#: so it is bounded rather than trusted; 100 characters is several times any real campaign name.
+UTM_MAX_LENGTH = 100
+
+
+def attribution_from_query(params: Any) -> dict[str, str]:
+    """The whitelisted `utm_*` values in a query mapping, cleaned, or `{}` when there are none.
+
+    Takes any mapping with `.get` (starlette's `QueryParams`, a plain dict). Values are stripped
+    of non-printable characters and surrounding whitespace and cut to `UTM_MAX_LENGTH`; an empty
+    value after cleaning is dropped rather than stored as `""`, so "no UTM" has one spelling.
+    Case is kept: a variant code is an identifier, and lowercasing it would break the join.
+    """
+    out: dict[str, str] = {}
+    for key in UTM_KEYS:
+        raw = params.get(key) if params is not None else None
+        if raw is None:
+            continue
+        value = "".join(ch for ch in str(raw) if ch.isprintable()).strip()[:UTM_MAX_LENGTH]
+        if value:
+            out[key] = value
+    return out
+
 #: The three amounts every ratio is built from. Named separately from `amount_minor`
 #: because they are three different money flows on one row and a reader of
 #: `amount_minor` alone cannot tell captured from refunded.

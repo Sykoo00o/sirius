@@ -8,6 +8,8 @@ from marketing_agent import compliance, meta
 from marketing_agent.cli import Agent, main
 from marketing_agent.config import AdRules, MarketingSettings
 
+from .conftest import load_funnel_module
+
 RULES = AdRules()
 
 
@@ -106,3 +108,20 @@ def test_patterns_ingest(app, tmp_path, capsys):
     assert main(["patterns", "ingest", str(path)]) == 0
     assert json.loads(capsys.readouterr().out) == {"stored": 1, "duplicate": 0, "too_young": 1,
                                                     "invalid": 1}
+
+
+def test_approval_emits_attributed_landing_urls(app):
+    """Each planned variant gets the destination the funnel can join back to a trial."""
+    from urllib.parse import parse_qs, urlparse
+    agent = Agent(MarketingSettings.from_env())
+    bid = agent.draft(niche="n", concept="c")["brief_id"]
+    result = agent.approve(bid, "operator")
+    assert set(result["landing_urls"]) == set(result["variants_planned"])
+    telemetry = load_funnel_module("telemetry", app["name"])
+    for code, url in result["landing_urls"].items():
+        parsed = urlparse(url)
+        assert url.startswith(app["offer"].public_url)
+        flat = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+        assert telemetry.attribution_from_query(flat)["utm_content"] == code, \
+            "the funnel must keep the variant code intact for the join"
+        assert flat["utm_campaign"] == bid

@@ -283,7 +283,8 @@ PAGE_EVENTS: tuple[tuple[str, str, bool], ...] = (
 )
 
 
-def count_page_view(visitor_key: str, path: str, *, redirecting: bool = False) -> None:
+def count_page_view(visitor_key: str, path: str, *, redirecting: bool = False,
+                    attribution: dict[str, str] | None = None) -> None:
     """Write the funnel step for `path`, if `path` is a funnel step.
 
     The decision half, split from `track_page_view` so a test can drive the rules directly
@@ -313,6 +314,10 @@ def count_page_view(visitor_key: str, path: str, *, redirecting: bool = False) -
     in `tests/conftest.py`), so a walk's question pages are twelve separate requests that each
     land on their own 200. Production redirect chains have the same shape: the app bounces onward,
     the browser requests the next page as its own request.
+
+    `attribution` is the cleaned `utm_*` set (`telemetry.attribution_from_query`) and is
+    stored only on `lp_view`, in `detail_json`; every other step ignores it, because the
+    join from an ad to a trial is the visitor key, not a UTM copied onto every row.
     """
     matched = matched_step(path)
     if matched is None or path in NON_PAGE_PATHS:
@@ -322,7 +327,8 @@ def count_page_view(visitor_key: str, path: str, *, redirecting: bool = False) -
     event, dedupe = matched
     if dedupe:
         day = telemetry.day_of(telemetry.utc_now())
-        billing.track(event, visitor_key=visitor_key,
+        detail = {"utm": attribution} if attribution and event == "lp_view" else None
+        billing.track(event, visitor_key=visitor_key, detail=detail,
                       idempotency_key=f"{event}:{visitor_key}:{day}")
     else:
         billing.track(event, visitor_key=visitor_key)
@@ -345,7 +351,8 @@ def track_page_view(request: Request, *, redirecting: bool = False) -> None:
     """
     if request.method != "GET":
         return
-    count_page_view(get_visitor(request), request.url.path, redirecting=redirecting)
+    count_page_view(get_visitor(request), request.url.path, redirecting=redirecting,
+                    attribution=telemetry.attribution_from_query(request.query_params))
 
 
 #: Paths that share a funnel prefix but are not that step. `/checkout/complete` and

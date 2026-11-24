@@ -141,8 +141,12 @@ in the app's `quiz.QUESTIONS`, and its `options` must be a subset of that questi
 * **Agent → engine (future):** ad-spend intents go to `POST /spend/gate` on the finance agent as
   tier-2 with `rationale` and `expected_roi_note` (`VALIDATION_AND_AGENT_ASSIST_PLAN.md` §2.4). Not
   wired in v1.
-* **Attribution:** `utm_content=<variant_code>` on `destination_url` is the join key between an ad and
-  `trial_events` (the funnel does not record UTMs today — a funnel change, listed below).
+* **Attribution:** `brief approve` returns a `landing_urls` map, one per planned variant, with
+  `utm_source=meta&utm_medium=paid_social&utm_campaign=<brief_id>&utm_content=<variant_code>`. Both
+  funnels keep the five `utm_*` keys (cleaned, 100 characters each, click ids such as `fbclid` dropped)
+  in `lp_view`'s `detail_json` via `telemetry.attribution_from_query`; `visitor_key` then joins that
+  arrival to the same visitor's `trial_started` / `trial_paid` rows. First touch per visitor per UTC
+  day, because `lp_view` is deduped on that key.
 * **LLM:** when enabled, hooks are drafted through `backend/llm_router.py` loaded by file path, same as
   `llm_flavour.py`; output passes the same gate. Not wired in v1 (`MARKETING_LLM_ENABLED` has no effect
   beyond `status`).
@@ -159,8 +163,8 @@ in the app's `quiz.QUESTIONS`, and its `options` must be a subset of that questi
 
 ## 9. Open items outside this scaffold
 
-* The funnel does not capture `utm_*` on `lp_view`; ad-to-trial attribution needs that added to
-  `funnel_app/telemetry.py` `detail_json` (a funnel change, not done here).
+* Attribution is captured but not yet reported: neither `scripts/export_lane_c_metrics.py` nor this
+  agent groups trials by `utm_content` yet.
 * No systemd unit yet; when a schedule is wanted, copy the metrics-timer pattern with
   `StateDirectory=marketing-agent` and `MARKETING_DB_PATH=/var/lib/marketing-agent/marketing.sqlite3`.
 * Register handle `marketing` in `engine.agents` before it ever calls the finance gate.

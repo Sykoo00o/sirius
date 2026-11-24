@@ -393,9 +393,9 @@ def test_the_landing_view_survives_a_bouncing_response(tele_client, monkeypatch)
     seen: list[tuple[str, bool]] = []
     real = tele_client.main.count_page_view
 
-    def spy(visitor_key: str, path: str, *, redirecting: bool = False) -> None:
+    def spy(visitor_key: str, path: str, *, redirecting: bool = False, **kw) -> None:
         seen.append((path, redirecting))
-        real(visitor_key, path, redirecting=redirecting)
+        real(visitor_key, path, redirecting=redirecting, **kw)
 
     monkeypatch.setattr(tele_client.main, "count_page_view", spy)
     # Called directly rather than served, because no route answers `/` with a 3xx and the point is
@@ -432,9 +432,9 @@ def test_the_middleware_reports_a_bounce_as_a_bounce(tele_client, monkeypatch):
     seen: list[tuple[str, bool]] = []
     real = tele_client.main.count_page_view
 
-    def spy(visitor_key: str, path: str, *, redirecting: bool = False) -> None:
+    def spy(visitor_key: str, path: str, *, redirecting: bool = False, **kw) -> None:
         seen.append((path, redirecting))
-        real(visitor_key, path, redirecting=redirecting)
+        real(visitor_key, path, redirecting=redirecting, **kw)
 
     monkeypatch.setattr(tele_client.main, "count_page_view", spy)
     get(tele_client, "/onboarding")                       # 302
@@ -1889,3 +1889,56 @@ def test_installed_funnel_units_are_clean_after_substitution(tmp_path):
         "ExecStart=/srv/kegeldoc_app/.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8091"
     ), "the installed ExecStart is not the one this deploy was verified with"
     tmp_path  # reserved; the asserts above read the templates directly
+
+
+# ===========================================================================
+# Ad attribution on the landing view
+# ===========================================================================
+
+def test_attribution_whitelists_and_bounds_utm_values():
+    """Only the five `utm_*` keys survive, click ids never do, and a hostile value is bounded."""
+    telemetry = importlib.import_module("telemetry")
+    got = telemetry.attribution_from_query({
+        "utm_source": " meta ", "utm_content": "abc123:body_01:hook_02", "utm_term": "",
+        "fbclid": "IwAR-person-click-id", "email": "a@b.example",
+        "utm_campaign": "x\n\x00" + "y" * 500,
+    })
+    assert got["utm_source"] == "meta"
+    assert got["utm_content"] == "abc123:body_01:hook_02", "case and colons are kept for the join"
+    assert "utm_term" not in got, "an empty value has one spelling: absent"
+    assert "fbclid" not in got and "email" not in got
+    assert len(got["utm_campaign"]) == telemetry.UTM_MAX_LENGTH
+    assert "\n" not in got["utm_campaign"] and "\x00" not in got["utm_campaign"]
+    assert telemetry.attribution_from_query({}) == {}
+
+
+def test_landing_view_stores_utm_in_detail(tele_client):
+    tele_client.get("/?utm_source=meta&utm_medium=paid_social&utm_content=v1&fbclid=zzz")
+    rows = tele_client.events.events(today(), event="lp_view")
+    assert len(rows) == 1
+    detail = json.loads(rows[0]["detail_json"])
+    assert detail == {"utm": {"utm_source": "meta", "utm_medium": "paid_social",
+                              "utm_content": "v1"}}
+
+
+def test_landing_view_without_utm_keeps_an_empty_detail(tele_client):
+    tele_client.get("/")
+    rows = tele_client.events.events(today(), event="lp_view")
+    assert json.loads(rows[0]["detail_json"]) == {}
+
+
+def test_first_touch_wins_within_the_day(tele_client):
+    """`lp_view` is one row per visitor per day, so a later ad click the same day does not
+    rewrite the first arrival's attribution."""
+    tele_client.get("/?utm_content=first")
+    tele_client.get("/?utm_content=second")
+    rows = tele_client.events.events(today(), event="lp_view")
+    assert len(rows) == 1
+    assert json.loads(rows[0]["detail_json"])["utm"]["utm_content"] == "first"
+
+
+def test_utm_is_not_copied_onto_lower_steps(tele_client):
+    get(tele_client, "/?utm_content=v1")
+    get(tele_client, "/onboarding/0?utm_content=v1")
+    rows = tele_client.events.events(today(), event="quiz_started")
+    assert rows and json.loads(rows[0]["detail_json"]) == {}

@@ -185,3 +185,18 @@ def planned_variants(bid: str, payload: dict[str, Any]) -> list[VariantPlan]:
     plans += [VariantPlan(f"{bid}:{card['card_id']}", "STATIC_QUIZ_CARD")
               for card in payload.get("static_quiz_cards", [])]
     return plans
+
+
+def landing_url(payload: dict[str, Any], plan: VariantPlan) -> str:
+    """The ad's destination with the attribution the funnel records on `lp_view`.
+
+    `utm_content` is the variant code, the join key from an ad to that visitor's trial rows;
+    `utm_campaign` is the brief. The funnel keeps only these `utm_*` keys and caps each at 100
+    characters (`telemetry.attribution_from_query`), which a variant code fits well inside.
+    """
+    from urllib.parse import urlencode
+    query = urlencode({"utm_source": "meta", "utm_medium": "paid_social",
+                       "utm_campaign": plan.variant_code.split(":", 1)[0],
+                       "utm_content": plan.variant_code})
+    base = str(payload["destination_url"])
+    return f"{base}{'&' if '?' in base else '?'}{query}"

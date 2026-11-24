@@ -42,10 +42,10 @@ def app(request, monkeypatch):
     }
 
 
-def load_funnel_module(name: str):
+def load_funnel_module(name: str, app_dir: str = "funnel_app"):
     """Load a stdlib-only funnel module (telemetry, billing_store) by path, for fixtures."""
-    path = REPO / "funnel_app" / f"{name}.py"
-    spec = importlib.util.spec_from_file_location(f"test_funnel_{name}", path)
+    path = REPO / app_dir / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(f"test_{app_dir}_{name}", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

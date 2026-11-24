@@ -70,13 +70,15 @@ class Agent:
     def approve(self, bid: str, actor: str) -> dict[str, Any]:
         ok, message = self.store.approve(bid, actor=actor)
         planned: list[str] = []
+        urls: dict[str, str] = {}
         if ok:
             payload = self.store.get_brief(bid)["payload"]
             for plan in briefs.planned_variants(bid, payload):
                 self.store.plan_variant(plan.variant_code, bid, plan.asset_type)
                 planned.append(plan.variant_code)
+                urls[plan.variant_code] = briefs.landing_url(payload, plan)
         return {"brief_id": bid, "approved": ok, "message": message,
-                "variants_planned": planned, "rendered": False,
+                "variants_planned": planned, "landing_urls": urls, "rendered": False,
                 "note": "rendering and upload are not built; variants are PLANNED only"}
 
     def evaluate_telemetry(self, path: Path, *, day: str, skip_funnel: bool) -> dict[str, Any]:
