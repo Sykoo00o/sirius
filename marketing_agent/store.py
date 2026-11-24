@@ -233,6 +233,19 @@ class MarketingStore:
                  reference_text, utc_now()))
             return cur.rowcount > 0
 
+    def patterns(self, niche: str = "") -> list[dict[str, Any]]:
+        """Abstract patterns only (`pattern_json`); never the reference text."""
+        sql, args = "select pattern_json from competitor_patterns", ()
+        if niche:
+            sql, args = sql + " where niche = ?", (niche,)
+        with self._lock, self._connect() as conn:
+            return [json.loads(r["pattern_json"]) for r in conn.execute(sql + " order by id", args)]
+
+    def set_variant_status(self, variant_code: str, status: str) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute("update asset_variants set status = ? where variant_code = ?",
+                         (status, variant_code))
+
     def reference_texts(self, niche: str = "") -> list[str]:
         sql, args = "select reference_text from competitor_patterns where reference_text != ''", ()
         if niche:

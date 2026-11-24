@@ -83,7 +83,9 @@ def test_telemetry_evaluate_records_intents_only(app, tmp_path, capsys):
     out = json.loads(capsys.readouterr().out)
     by_ad = {r["meta_ad_id"]: r for r in out["recommendations"]}
     assert by_ad["ad_low"]["executed"] == "intent_recorded"
-    assert by_ad["ad_win"]["action"] == meta.WINNER and by_ad["ad_win"]["executed"] == "none"
+    # --skip-funnel means the risk ceilings were not checked, so a winner is withheld.
+    assert by_ad["ad_win"]["action"] == meta.KEEP and "withheld" in by_ad["ad_win"]["reason"]
+    assert by_ad["ad_win"]["executed"] == "none"
     agent = Agent(MarketingSettings.from_env())
     assert all(r["executed"] == 0 for r in agent.store.recommendations())
     # Re-running the same window is one row per ad, not two.

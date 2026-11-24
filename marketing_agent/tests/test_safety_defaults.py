@@ -66,14 +66,25 @@ def test_fully_armed_still_cannot_mutate_in_v1(monkeypatch, tmp_path):
         client.publish("v1")
 
 
-def test_package_makes_no_network_calls_and_imports_no_engine():
-    """Stdlib-only and offline: the only subprocess is the operator's metrics script, --offline."""
+def test_only_graph_py_touches_the_network_and_imports_no_engine():
+    """Stdlib-only. One module may open a socket (`graph.py`, GET-only reads of Meta); nothing else
+    may, and nothing imports the engine. The metrics subprocess always runs `--offline`."""
     banned = re.compile(r"^\s*(?:import|from)\s+(httpx|requests|urllib\.request|socket|http\.client|"
                         r"aiohttp|smtplib|backend|engine|fastapi)\b", re.M)
     for path in PACKAGE.glob("*.py"):
-        assert not banned.search(path.read_text()), path.name
-    metrics_src = (PACKAGE / "funnel_metrics.py").read_text()
-    assert '"--offline"' in metrics_src
+        found = banned.findall(path.read_text())
+        if path.name == "graph.py":
+            assert set(found) <= {"urllib.request"}, found
+        else:
+            assert not found, (path.name, found)
+    assert '"--offline"' in (PACKAGE / "funnel_metrics.py").read_text()
+
+
+def test_graph_module_can_only_get():
+    src = (PACKAGE / "graph.py").read_text()
+    assert 'method="GET"' in src
+    for verb in ('"POST"', '"DELETE"', '"PUT"', '"PATCH"', "data="):
+        assert verb not in src, verb
 
 
 def test_agent_never_touches_engine_or_funnel_switches():

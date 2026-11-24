@@ -8,15 +8,18 @@
   recommend_pause    thumbstop, outbound CTR or day-0 ROAS below its floor, past its floor
   keep               none of the above
 
-Nothing here calls Meta. `FixtureInsightsSource` reads an exported JSON file; a read-only Graph API
-source can implement the same `rows()` later. `UnarmedMetaClient` is the only place a pause or a
+Two Insights sources share one `rows()` contract: `FixtureInsightsSource` (an exported JSON file,
+the default) and `GraphInsightsSource` (read-only `GET /act_{id}/insights` through `graph.py`, used
+only with `--source api`). `UnarmedMetaClient` is the only place a pause or a
 publish could happen, and in v1 it records an intent while dry-run and raises `NotBuilt` otherwise.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -88,12 +91,23 @@ class Recommendation:
         return dict(self.__dict__)
 
 
-def evaluate(stats: AdStats, rules: AdRules, *, funnel_halt: str = "") -> Recommendation:
+def evaluate(stats: AdStats, rules: AdRules, *, funnel_halt: str = "",
+             funnel_verified: bool = True) -> Recommendation:
+    """`funnel_halt` (a tripped dispute, fraud or prepaid ceiling) beats every rule. When the
+    funnel's risk check could not run or was skipped (`funnel_verified=False`), a winner is
+    withheld and reported as `keep`: scaling is never recommended on unverified risk."""
     def rec(action: str, reason: str) -> Recommendation:
         return Recommendation(stats.meta_ad_id, stats.window_end, action, reason)
 
     if funnel_halt:
         return rec(HALT, f"funnel kill metric: {funnel_halt}")
+    result = _rules(stats, rules, rec)
+    if result.action == WINNER and not funnel_verified:
+        return rec(KEEP, f"winner withheld: funnel risk check not verified ({result.reason})")
+    return result
+
+
+def _rules(stats: AdStats, rules: AdRules, rec) -> Recommendation:
 
     roas = stats.day0_roas
     if (roas is not None and roas >= rules.winner_roas
@@ -132,6 +146,81 @@ class FixtureInsightsSource:
         if not isinstance(data, list):
             raise ValueError("insights file must be a JSON list")
         return [AdStats.from_dict(item) for item in data]
+
+
+INSIGHTS_FIELDS = ("ad_id", "ad_name", "spend", "impressions", "actions", "action_values",
+                   "outbound_clicks", "video_p50_watched_actions", "date_start", "date_stop")
+#: Action types counted as a purchase, in preference order (pixel first, then the generic one).
+PURCHASE_TYPES = ("offsite_conversion.fb_pixel_purchase", "purchase", "omni_purchase")
+VARIANT_CODE = re.compile(r"[0-9a-f]{16}:[A-Za-z0-9_]+(?::[A-Za-z0-9_]+)?")
+
+
+def _action(items: Any, *types: str) -> float:
+    """First matching action type's value from a Graph `actions`-style list, else 0."""
+    if not isinstance(items, list):
+        return 0.0
+    by_type = {str(i.get("action_type")): i.get("value") for i in items if isinstance(i, dict)}
+    for action_type in types:
+        if action_type in by_type:
+            try:
+                return float(by_type[action_type] or 0)
+            except (TypeError, ValueError):
+                return 0.0
+    return 0.0
+
+
+def stats_from_insight(row: dict[str, Any]) -> AdStats:
+    """One `level=ad` Insights row -> AdStats.
+
+    Money arrives in the account currency's major units as a string; stored as minor units. The
+    variant code is read from the ad *name*, so name each ad with its variant code when uploading.
+    `hours_live` is the reporting window's length (date_start..date_stop inclusive), an upper bound
+    on time live inside the window, not the ad's age.
+    """
+    start, stop = str(row.get("date_start", "")), str(row.get("date_stop", ""))
+    try:
+        days = (datetime.fromisoformat(stop) - datetime.fromisoformat(start)).days + 1
+    except ValueError:
+        days = 0
+    name = str(row.get("ad_name", ""))
+    match = VARIANT_CODE.search(name)
+    return AdStats.from_dict({
+        "meta_ad_id": str(row.get("ad_id", "")),
+        "window_end": stop,
+        "variant_code": match.group(0) if match else "",
+        "spend_minor": round(float(row.get("spend") or 0) * 100),
+        "impressions": int(float(row.get("impressions") or 0)),
+        "video_3s_views": int(_action(row.get("actions"), "video_view")),
+        "video_p50_views": int(_action(row.get("video_p50_watched_actions"), "video_view")),
+        "outbound_clicks": int(_action(row.get("outbound_clicks"), "outbound_click")),
+        "purchases": int(_action(row.get("actions"), *PURCHASE_TYPES)),
+        "revenue_minor": round(_action(row.get("action_values"), *PURCHASE_TYPES) * 100),
+        "hours_live": max(0, days) * 24,
+    })
+
+
+class GraphInsightsSource:
+    """Read-only `GET /act_{id}/insights` at ad level over one date window, same `rows()` contract
+    as `FixtureInsightsSource`. Rows without an ad id are dropped rather than guessed."""
+
+    def __init__(self, reader, account_id: str, *, since: str, until: str) -> None:
+        account = account_id.strip()
+        account = account if account.startswith("act_") else f"act_{account}"
+        if not re.fullmatch(r"act_\d+", account):
+            raise ValueError("META_AD_ACCOUNT_ID must be numeric (with or without act_)")
+        for value in (since, until):
+            datetime.strptime(value, "%Y-%m-%d")
+        self.reader, self.account, self.since, self.until = reader, account, since, until
+
+    def rows(self) -> list[AdStats]:
+        params = {"level": "ad", "fields": ",".join(INSIGHTS_FIELDS),
+                  "time_range": json.dumps({"since": self.since, "until": self.until}),
+                  "limit": "200"}
+        out = []
+        for row in self.reader.paged(f"{self.account}/insights", params):
+            if row.get("ad_id") and row.get("date_stop"):
+                out.append(stats_from_insight(row))
+        return out
 
 
 class UnarmedMetaClient:

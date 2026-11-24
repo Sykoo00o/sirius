@@ -27,26 +27,47 @@ logging) and [`REUSABLE_FUNNEL_BUSINESS_BLUEPRINT.md`](REUSABLE_FUNNEL_BUSINESS_
 
 ## 2. Safety posture (all defaults "do less")
 
-Four independent switches, all off by default, read in `marketing_agent/config.py`:
+Five independent switches, all "do less" by default, read in `marketing_agent/config.py`:
 
 | Env var | Default | Gates |
 |---|---|---|
-| `MARKETING_DRY_RUN` | `true` | Master switch. While true, every external action is recorded as an intent and nothing else happens. Unparseable values count as `true`. |
+| `MARKETING_DRY_RUN` | `true` | Master switch. While true, every external action is recorded as an intent / dry-run receipt and nothing else happens. Unparseable values count as `true`. |
 | `MARKETING_AUTO_PAUSE` | `false` | Whether a pause *recommendation* may become a pause *call*. |
 | `MARKETING_PUBLISH_ENABLED` | `false` | Whether an approved asset may be uploaded/launched. |
-| `MARKETING_LLM_ENABLED` | `false` | Whether a model may draft hooks. Off = deterministic templates only. |
+| `MARKETING_RENDER_ENABLED` | `false` | Whether a manifest may be sent to an external (paid) media renderer. |
+| `MARKETING_AI_ENABLED` | `false` | Whether a model may draft hooks and review briefs (add-only, fail-closed). `MARKETING_LLM_ENABLED` is read as a legacy alias. |
 
-`MarketingSettings.can_pause_ads()` / `can_publish()` return `True` only when dry-run is off **and**
-the specific flag is on **and** `META_ACCESS_TOKEN` and `META_AD_ACCOUNT_ID` are present. In v1 even
-an armed setting reaches `meta.UnarmedMetaClient`, which raises `NotBuilt`: there is no HTTP client
-for ad mutations in the codebase. Arming is a code change plus an env change, deliberately.
+`can_pause_ads()` / `can_publish()` are `True` only when dry-run is off **and** the specific flag is
+on **and** `META_ACCESS_TOKEN` and `META_AD_ACCOUNT_ID` are present; `can_render()` needs dry-run off
+and `MARKETING_RENDER_ENABLED`. Even armed, every mutation stops: `meta.UnarmedMetaClient` raises
+`NotBuilt`, and `assets.stage` returns a `refused_not_built` receipt. There is no client for ad
+mutations, uploads or rendering in the codebase. Arming is a code change plus an env change,
+deliberately.
+
+**Reads are separate from mutations.** `graph.py` is the only module that may open a socket. Its
+transport takes a URL and query parameters, builds a `GET` and nothing else, accepts only
+`https://graph.facebook.com` (including Meta's `paging.next` links), caps pages at 20, and scrubs the
+token from every error. A command reaches it only with `--source api` (or `patterns fetch`); file
+input stays the default. Read env vars: `META_AD_LIBRARY_ACCESS_TOKEN` (Ad Library; falls back to
+`META_ACCESS_TOKEN`), `META_ACCESS_TOKEN` + `META_AD_ACCOUNT_ID` (Insights), `META_GRAPH_API_VERSION`
+(default `v21.0`). Tokens are read when a reader is built and are never stored, printed or logged.
 
 Human gates:
 
 * A brief can only reach `APPROVED` through `approve` with a named `--actor`; that writes an
   `is_audit=1` row to `agent_logs`. The deterministic gate can produce `FLAGGED` or
   `PASSED_CHECKS`, never `APPROVED`.
-* An optional LLM policy classifier may **add** findings; it cannot clear a deterministic flag.
+* The optional AI reviewer may **add** findings; it cannot clear a deterministic flag, and it runs
+  after the funnel's `claims.py` and the ad rules, so it cannot bypass them. Only an exact
+  `{"verdict": "pass", "findings": []}` reply adds nothing; non-JSON, any other verdict, an error or
+  timeout each become a finding. With AI enabled and no reachable model, every audit is flagged
+  (`ai_review_unavailable`), so a broken model blocks approval instead of waving briefs through.
+* The AI drafter proposes hooks only, as a **separate** brief (`concept_name` + `-ai`, new id).
+  Destination, price, disclosure, body and quiz cards are copied from the deterministic draft; the
+  model cannot set them. A malformed or over-long reply creates no brief at all.
+* **Winners need a verified funnel.** When the funnel's risk check is skipped or cannot run, a
+  winner is reported as `keep` ("winner withheld"); a tripped ceiling makes everything
+  `halt_all_scaling`.
 
 ## 3. Deliberate departures from `web2app_marketing_agentic_setup_blueprint.md`
 
@@ -54,8 +75,8 @@ That blueprint was used for the module split and data model. These parts were **
 
 | Blueprint item | Decision | Reason |
 |---|---|---|
-| Stealth headless scraping of Meta Ad Library with randomised delays | Not built. `adspy.py` ingests a JSON file (e.g. an export from Meta's official Ad Library API, or notes typed by hand). | Bot-evasion against a platform's terms; the official API exists. |
-| Storing competitor transcripts to rewrite | Only abstract patterns are stored (`hook_type`, `visual_metaphor`, `emotional_driver`, `quiz_entry_angle`, `days_active`). A gate rule rejects hooks sharing an 8-word run with any ingested reference text. | Copying competitor copy is a copyright and policy problem. |
+| Stealth headless scraping of Meta Ad Library with randomised delays | Not built. `adspy.AdLibrarySource` reads Meta's official `GET /ads_archive` API (`patterns fetch`); a JSON file (`patterns ingest`) is the fallback and fixture. | Bot-evasion against a platform's terms; the official API exists. |
+| Storing competitor transcripts to rewrite | Only abstract patterns are stored: `hook_type`, `cta_style` and `copy_length` from fixed vocabularies, plus `quiz_entry_angle`, `platforms`, and hand-entered `visual_metaphor` / `emotional_driver`. Free-text values outside a vocabulary are dropped. The ad's own words go only to `reference_text`, used solely by the rule that rejects hooks sharing an 8-word run with it; prompts to the AI drafter carry patterns, never reference text. | Copying competitor copy is a copyright and policy problem. |
 | "Specialist explainer" hooks with a photoreal urologist / doctor avatar | Blocked by the `impersonation` rule (doctor, physician, urologist, specialist, scrubs, clinician, nurse, dermatologist in visual prompts or speech). | Presents an AI actor as a medical professional; the funnel's own `claims.py` already bans "doctor"/"physician" in copy. |
 | Static "quiz-mirror" cards with clickable-style buttons | Cards are generated from the funnel's **real** first questions and render options as a plain list; a `fake_ui` rule rejects "tap/click below", "button", "play button", "notification" in card text or prompts. The ad platform's own CTA button is the only button. | Non-functional UI in ad images is a deceptive pattern and is rejected by ad review. |
 | Compliance "auto-rewrite & re-score until ≥ 0.92" loop | Not built. Flagged briefs stay `FLAGGED`; a new brief must be drafted. | Rewriting until a classifier passes optimises for slipping past review, the opposite of the funnel's reject-not-scrub rule. |
@@ -86,14 +107,19 @@ marketing_agent/
 ├── compliance.py        # audit_brief(): deterministic layer + optional classifier (add-only)
 ├── store.py             # SQLite: briefs, audits, assets, patterns, ad_telemetry, recommendations, agent_logs
 ├── funnel_metrics.py    # runs scripts/export_lane_c_metrics.py --json --offline, parses breaches
-├── meta.py              # AdStats, evaluate(), fixture insights source, UnarmedMetaClient
-├── adspy.py             # CompetitorPattern ingest from JSON (no scraping)
-├── cli.py               # status | brief draft | brief audit | brief approve | patterns ingest |
-│                        #   telemetry evaluate | funnel-health
-└── tests/
+├── graph.py             # the only network module: GET-only, graph.facebook.com only, token scrubbed
+├── meta.py              # AdStats, evaluate(), fixture + Graph insights sources, UnarmedMetaClient
+├── adspy.py             # Ad Library API source + JSON fallback -> abstract patterns (no scraping)
+├── ai.py                # optional drafter + reviewer over backend/llm_router.py (add-only, fail-closed)
+├── assets.py            # render manifests for APPROVED briefs; stage() -> receipts, never executes
+├── report.py            # read-only ad x trial report under the funnel kill switch
+├── cli.py               # status | brief draft [--ai] | brief audit/approve/show | patterns ingest/fetch |
+│                        #   assets manifest/stage | telemetry evaluate | report ads | attribution |
+│                        #   funnel-health
+└── tests/               # HTTP and model calls are faked; no network, no credentials
 ```
 
-Stdlib only. Tests: `uv run --with pytest --no-project python -m pytest marketing_agent/tests -q`.
+Stdlib only (the backend router, when AI is on, brings its own `httpx`). Tests: `uv run --with pytest --no-project python -m pytest marketing_agent/tests -q`.
 
 ## 5. Data model (`MARKETING_DB_PATH`, default `marketing_agent/data/marketing.sqlite3`)
 
@@ -109,7 +135,9 @@ Stdlib only. Tests: `uv run --with pytest --no-project python -m pytest marketin
 
 Brief lifecycle events logged: `marketing.brief_drafted`, `marketing.brief_audited`,
 `marketing.brief_approved` (audit), `marketing.intent_recorded` (any action skipped by dry-run),
-`marketing.funnel_halt`.
+`marketing.funnel_halt`, `marketing.patterns_fetched`, `marketing.ai_draft_failed`,
+`marketing.manifests_built`, `marketing.manifest_refused`, `marketing.receipt` (one per render /
+publish attempt, `executed: false` always). `asset_variants.status` goes `PLANNED` → `MANIFESTED`.
 
 ## 6. Brief contract
 
@@ -152,15 +180,33 @@ in the app's `quiz.QUESTIONS`, and its `options` must be a subset of that questi
   captured revenue, refunds and disputes, first touch inside the window, events after `--until`
   excluded. Each row is marked `known_variant` / `brief_id` from this agent's planned variants;
   visitors with no landing view in the window are counted in `unattributed_events`, never guessed.
-* **LLM:** when enabled, hooks are drafted through `backend/llm_router.py` loaded by file path, same as
-  `llm_flavour.py`; output passes the same gate. Not wired in v1 (`MARKETING_LLM_ENABLED` has no effect
-  beyond `status`).
+* **LLM:** `ai.router_completer` loads `backend/llm_router.py` by file path (same as
+  `llm_flavour.py`) and calls its `fast` tier with `json_mode`; provider keys stay in that module's env.
+* **Assets:** `assets manifest BRIEF_ID` writes one JSON manifest per planned variant under
+  `<MARKETING_STATE_DIR>/manifests/<brief_id>/`. Cards: 1080x1350, background prompt, the real quiz
+  question and its real option labels as a plain text list, footer, and the exact disclosure line.
+  Videos: 1080x1920, 0-3 s hook, body, burned-in captions, end card with the exact disclosure line.
+  Each carries its tagged `landing_url` and constant `render_rules`. The shape check and every ad rule
+  run again on the manifest's own strings, so an approved brief edited afterwards gets no manifest.
+  `assets stage VARIANT` returns render + publish receipts: `dry_run` (default), `not_armed`
+  (dry-run off, flag off) or `refused_not_built` (armed, exit 1).
+* **Insights:** `telemetry evaluate --source api [--since D --until D]` reads `GET /act_{id}/insights`
+  at ad level and feeds the same `evaluate()`. Name each ad with its variant code: the variant is read
+  from the ad name. `hours_live` from the API is the window length (an upper bound).
+* **Ad x trial report:** `report ads (--insights FILE | --source api) [--since 7daysago] [--until
+  yesterday]` joins Meta delivery per variant (spend, impressions, clicks, Meta purchases/revenue) to
+  the funnel's attribution (landing views, trials, paid, captured revenue, refunds, disputes) and
+  reports `cost_per_trial_minor`, `cost_per_paid_minor` and `funnel_roas` (funnel revenue / spend).
+  Funnel health is checked for **every day** in the window (`funnel_metrics.window_snapshot`); one
+  breached day halts every row, exit 2. Read-only: nothing is saved or executed.
 
 ## 8. Graduation path (each step is a separate, reviewed change)
 
-1. **Now:** draft + audit + human approve; manual upload by the operator; daily
-   `funnel-health` and `telemetry evaluate` on exported Insights CSV/JSON.
-2. Read-only Meta Insights client (GET only) behind `META_ACCESS_TOKEN`; still recommendations only.
+1. **Done:** draft + audit + human approve; manifests; dry-run staging receipts; manual upload by
+   the operator; `funnel-health`, `telemetry evaluate` and `report ads` on exported Insights.
+2. **Done (code):** read-only Graph clients for the Ad Library and Insights, used on request
+   (`--source api`); optional AI drafter/reviewer. Next: run them against a real token by hand and
+   compare with Ads Manager before any schedule.
 3. Telegram alert of recommendations via the existing finance-agent notify path.
 4. Pause-only mutation, behind `MARKETING_DRY_RUN=false` + `MARKETING_AUTO_PAUSE=true`, after 48 h of
    recommendations matching what a human would have done (the pasted blueprint's own Phase 3 advice).
@@ -168,9 +214,13 @@ in the app's `quiz.QUESTIONS`, and its `options` must be a subset of that questi
 
 ## 9. Open items outside this scaffold
 
-* By-ad numbers are funnel-side only: `attribution` reports visitors, trials, paid and captured revenue
-  per `utm_content`, but does not join Meta spend, so per-ad ROAS from the funnel's own revenue is
-  not computed yet (needs the variant code carried on each Insights row).
+* Not tested against the live Graph API: the field mapping (`video_view` as 3-second views, pixel
+  purchase action types, `ad_reached_countries` EU/UK limit for commercial ads) follows Meta's
+  documented shapes and is exercised only with faked responses. Verify against Ads Manager first.
+* No render or upload client exists; manifests are renderer-agnostic JSON for a human or a future,
+  separately reviewed client.
+* `report ads` relies on the ad name carrying the variant code; ads named otherwise land in the
+  `(untagged)` delivery row and are counted in `ads_without_variant_code`.
 * No systemd unit yet; when a schedule is wanted, copy the metrics-timer pattern with
   `StateDirectory=marketing-agent` and `MARKETING_DB_PATH=/var/lib/marketing-agent/marketing.sqlite3`.
 * Register handle `marketing` in `engine.agents` before it ever calls the finance gate.

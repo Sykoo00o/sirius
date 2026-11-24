@@ -1,14 +1,21 @@
 """Environment-only settings. Every default means "do less" (CLAUDE.md rule 2: no secrets in code).
 
-Four switches, all off by default, each read independently:
+Five switches, all "do less" by default, each read independently:
 
   MARKETING_DRY_RUN          true   master switch; unparseable values also mean true
   MARKETING_AUTO_PAUSE       false  may a pause recommendation become a pause call
   MARKETING_PUBLISH_ENABLED  false  may an approved asset be uploaded or launched
-  MARKETING_LLM_ENABLED      false  may a model draft hooks (off = deterministic templates)
+  MARKETING_RENDER_ENABLED   false  may a manifest be sent to an external (paid) media renderer
+  MARKETING_AI_ENABLED       false  may a model draft hooks or review a brief (add-only, fail-closed);
+                                    `MARKETING_LLM_ENABLED` is read as a legacy alias
 
-Arming an action needs dry-run off AND its own flag AND the Meta credentials present. Even then
-v1 has no mutation client (`meta.UnarmedMetaClient` raises), so arming is also a code change.
+Arming an action needs dry-run off AND its own flag (AND the Meta credentials for ad actions). Even
+then there is no mutation, upload or render client (`meta.UnarmedMetaClient` / `assets.stage`
+raise `NotBuilt`), so arming is also a code change.
+
+Meta *reads* (Ad Library `ads_archive`, Marketing API insights) are GET-only, go through
+`graph.py`'s host-allowlisted transport, and run only when a CLI call asks for `--source api`.
+Tokens are read from the environment at the moment a reader is built and never stored here.
 """
 
 from __future__ import annotations
@@ -60,6 +67,12 @@ def _path(name: str, default: Path) -> Path:
     return path if path.is_absolute() else REPO_ROOT / path
 
 
+def ad_library_token() -> str:
+    """`META_AD_LIBRARY_ACCESS_TOKEN`, falling back to `META_ACCESS_TOKEN`. Read on use, never kept."""
+    return (os.getenv("META_AD_LIBRARY_ACCESS_TOKEN", "").strip()
+            or os.getenv("META_ACCESS_TOKEN", "").strip())
+
+
 @dataclass(frozen=True)
 class AdRules:
     """Recommendation thresholds, from the web2app blueprint's decision table. Minor units for
@@ -103,11 +116,14 @@ class MarketingSettings:
     auto_pause: bool = False
     publish_enabled: bool = False
     llm_enabled: bool = False
+    render_enabled: bool = False
     app_dir: Path = REPO_ROOT / "funnel_app"
     db_path: Path = PACKAGE_DIR / "data" / "marketing.sqlite3"
     state_dir: Path = PACKAGE_DIR / "data"
     meta_token_present: bool = False
     meta_account_present: bool = False
+    ad_library_token_present: bool = False
+    graph_api_version: str = "v21.0"
     #: Prepaid share above this halts scaling, matching the export's own note threshold.
     prepaid_share_halt_pct: float = 20.0
     rules: AdRules = AdRules()
@@ -119,13 +135,16 @@ class MarketingSettings:
             dry_run=_dry_run(),
             auto_pause=_flag("MARKETING_AUTO_PAUSE", False),
             publish_enabled=_flag("MARKETING_PUBLISH_ENABLED", False),
-            llm_enabled=_flag("MARKETING_LLM_ENABLED", False),
+            llm_enabled=_flag("MARKETING_AI_ENABLED", False) or _flag("MARKETING_LLM_ENABLED", False),
+            render_enabled=_flag("MARKETING_RENDER_ENABLED", False),
             app_dir=_path("MARKETING_FUNNEL_APP_DIR", cls.app_dir),
             db_path=db_path,
             state_dir=_path("MARKETING_STATE_DIR", db_path.parent),
             # Presence only. The values are never stored on this object, so it can be printed.
             meta_token_present=bool(os.getenv("META_ACCESS_TOKEN", "").strip()),
             meta_account_present=bool(os.getenv("META_AD_ACCOUNT_ID", "").strip()),
+            ad_library_token_present=bool(ad_library_token()),
+            graph_api_version=(os.getenv("META_GRAPH_API_VERSION", "").strip() or "v21.0"),
             prepaid_share_halt_pct=_float("MARKETING_PREPAID_SHARE_HALT_PCT", 20.0),
             rules=AdRules.from_env(),
         )
@@ -140,6 +159,13 @@ class MarketingSettings:
     def can_publish(self) -> bool:
         return (not self.dry_run) and self.publish_enabled and self.meta_configured
 
+    def can_render(self) -> bool:
+        return (not self.dry_run) and self.render_enabled
+
+    @property
+    def ai_enabled(self) -> bool:
+        return self.llm_enabled
+
     def describe(self) -> dict[str, object]:
         """Safe to print: flags and paths, never credentials."""
         return {
@@ -147,11 +173,16 @@ class MarketingSettings:
             "dry_run": self.dry_run,
             "auto_pause": self.auto_pause,
             "publish_enabled": self.publish_enabled,
-            "llm_enabled": self.llm_enabled,
+            "ai_enabled": self.llm_enabled,
+            "render_enabled": self.render_enabled,
             "meta_configured": self.meta_configured,
+            "ad_library_configured": self.ad_library_token_present,
+            "graph_api_version": self.graph_api_version,
             "can_pause_ads": self.can_pause_ads(),
             "can_publish": self.can_publish(),
+            "can_render": self.can_render(),
             "app_dir": str(self.app_dir),
             "db_path": str(self.db_path),
-            "mutation_client": "not built (v1 is draft-only)",
+            "mutation_client": "not built (draft-only; render, publish and pause raise NotBuilt)",
+            "meta_reads": "GET only, on request (--source api)",
         }

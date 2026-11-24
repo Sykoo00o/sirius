@@ -8,6 +8,8 @@ Layers:
   2. deterministic `policy.check_text` on every string (funnel claims + ad rules)
   3. classifier   optional, add-only. It may contribute findings; it cannot clear one, and an
                   exception from it is itself a finding (fail closed), never a pass.
+  4. ai_review    optional brief-level reviewer (`ai.make_reviewer`), same add-only, fail-closed
+                  contract. Runs after layers 1-2, so it can never bypass the funnel's `claims.py`.
 """
 
 from __future__ import annotations
@@ -24,6 +26,8 @@ PASSED_CHECKS = "PASSED_CHECKS"
 
 #: (field, text) -> findings. A model-backed policy classifier plugs in here later.
 Classifier = Callable[[str, str], list[policy.Finding]]
+#: [(field, text), ...] -> findings, one call per brief.
+Reviewer = Callable[[list[tuple[str, str]]], list[policy.Finding]]
 
 
 @dataclass(frozen=True)
@@ -43,7 +47,8 @@ class AuditResult:
 
 def audit_brief(payload: dict[str, Any], *, quiz, claims, offer: OfferTerms,
                 references: Iterable[str] = (),
-                classifier: Classifier | None = None) -> AuditResult:
+                classifier: Classifier | None = None,
+                reviewer: Reviewer | None = None) -> AuditResult:
     findings: list[policy.Finding] = []
     layers = ["shape"]
     try:
@@ -65,5 +70,13 @@ def audit_brief(payload: dict[str, Any], *, quiz, claims, offer: OfferTerms,
                 findings += list(classifier(field_path, text))
             except Exception as exc:  # noqa: BLE001 - a broken classifier is not a pass
                 findings.append(policy.Finding("classifier_error", field_path, str(exc)[:200]))
+
+    if reviewer is not None:
+        layers.append("ai_review")
+        try:
+            findings += list(reviewer(strings))
+        except Exception as exc:  # noqa: BLE001 - a failed review is a flag, never a pass
+            findings.append(policy.Finding("ai_review_error", "brief",
+                                           f"{type(exc).__name__}: {str(exc)[:180]}"))
 
     return AuditResult(FLAGGED if findings else PASSED_CHECKS, tuple(findings), tuple(layers))

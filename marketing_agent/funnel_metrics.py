@@ -80,6 +80,34 @@ def snapshot(settings: MarketingSettings, day: str = "yesterday", *,
     return evaluate(payload.get("day", day), payload, settings)
 
 
+def window_snapshot(settings: MarketingSettings, since: str, until: str, *,
+                    env: dict[str, str] | None = None, timeout: int = 300) -> FunnelHealth:
+    """Funnel health over a window: halts if *any* day in it tripped a ceiling or the prepaid bar.
+
+    Ceilings are daily in the operator sheet, so a breach on Tuesday is not averaged away by a
+    quiet week. `available=False` when the export could not run; callers treat that as "not
+    verified", which withholds winners (see `meta.evaluate`).
+    """
+    settings.state_dir.mkdir(parents=True, exist_ok=True)
+    private_csv = settings.state_dir / f"funnel_snapshot_{settings.app_dir.name}.csv"
+    run_env = {**os.environ, **(env or {}), "FUNNEL_APP_DIR": str(settings.app_dir)}
+    completed = subprocess.run(
+        [sys.executable, str(EXPORT_SCRIPT), "--since", since, "--until", until, "--json",
+         "--offline", "--csv", str(private_csv)],
+        capture_output=True, text=True, timeout=timeout, env=run_env, check=False)
+    lines = [line for line in completed.stdout.splitlines() if line.startswith("{")]
+    label = f"{since}..{until}"
+    if completed.returncode == 1 or not lines:
+        reason = (completed.stderr.strip() or "no rows for the window")[:300]
+        return FunnelHealth(day=label, available=False, halt_scaling=False, reasons=(reason,))
+    days = [evaluate(d.get("day", ""), d, settings) for d in map(json.loads, lines)]
+    reasons = tuple(f"{h.day}: {r}" for h in days for r in h.reasons)
+    warnings = tuple(f"{h.day}: {w}" for h in days for w in h.warnings)
+    return FunnelHealth(day=label, available=True, halt_scaling=any(h.halt_scaling for h in days),
+                        reasons=reasons, counts={h.day: h.counts for h in days},
+                        metrics={h.day: h.metrics for h in days}, warnings=warnings)
+
+
 def by_ad(settings: MarketingSettings, since: str = "7daysago", until: str = "today", *,
           env: dict[str, str] | None = None, timeout: int = 120) -> dict[str, Any]:
     """Per-`utm_content` funnel counts from the export script's read-only `--by-ad` mode.
