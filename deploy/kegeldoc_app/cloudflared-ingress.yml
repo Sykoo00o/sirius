@@ -23,7 +23,7 @@ ingress:
   # Leave whatever the live file already has for the engine here, untouched.
 
   # --- NEW: the kegeldoc funnel -------------------------------------------------
-  - hostname: kegeldoc.vegastudios.site   # temporary, until kegeldoc has its own domain
+  - hostname: kegeldoc.fit   # kegeldoc's own domain since 2026-11-25 (was kegeldoc.vegastudios.site)
     service: http://127.0.0.1:8091
     # Under originRequest, and SINGULAR: `keepAliveTimeout`. Two earlier spellings in this very file
     # were wrong and cloudflared told us so only as a soft "unused keys" warning that still exits 0:
