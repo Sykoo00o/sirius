@@ -1,0 +1,12 @@
+{
+  "product": "daygo_fit",
+  "campaign": "starter_v1",
+  "anchor_path": "products/daygo_fit/anchors/daygo_anchor_1.png",
+  "anchor_prompt": "Handheld UGC-style vertical smartphone photo inside a bright modern home kitchen or home workout space in morning daylight. A fit person in athletic wear holds a sleek fitness/wellness setup with natural candid framing, realistic skin textures, and unedited smartphone look.",
+  "vars": {
+    "setting": "a bright modern home space in morning daylight",
+    "cast_description": "The same fit person in athletic wear from the opening shot in a candid smartphone frame.",
+    "hook_action_and_dialogue": "The creator looks straight into the vertical smartphone camera with an expressive hook line introducing a daily fitness habit.",
+    "pitch_action_and_dialogue": "The creator explains how Daygo.fit keeps daily consistency simple and says, 'Start your routine with Daygo.fit today.'"
+  }
+}

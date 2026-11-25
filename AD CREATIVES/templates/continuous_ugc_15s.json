@@ -1,0 +1,17 @@
+{
+  "template_name": "continuous_ugc_15s",
+  "image_model": "bytedance-seed/seedream-5-5",
+  "video_model": "bytedance/seedance-2.0",
+  "aspect_ratio": "9:16",
+  "resolution": "720p",
+  "shots": [
+    {
+      "id": 1,
+      "role": "continuous_full_ad",
+      "duration": 15,
+      "use_anchor": true,
+      "generate_audio": true,
+      "prompt_template": "Continuous single-take handheld UGC-style vertical smartphone video inside {setting}. {hook_action_and_dialogue} Immediately afterward, {pitch_action_and_dialogue} Natural garage lighting, realistic skin textures, candid unedited smartphone look, clear voices and accurate lip-sync throughout."
+    }
+  ]
+}
