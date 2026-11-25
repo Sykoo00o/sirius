@@ -1,0 +1,42 @@
+{
+  "template_name": "ugc_50s_mixed",
+  "image_model": "bytedance-seed/seedream-5-5",
+  "video_model": "bytedance/seedance-2.0",
+  "aspect_ratio": "9:16",
+  "resolution": "720p",
+  "total_duration": 50,
+  "shots": [
+    {
+      "id": 1,
+      "role": "scene_1",
+      "duration": 15,
+      "use_anchor": true,
+      "generate_audio": true,
+      "prompt_template": "Handheld UGC-style vertical smartphone video inside {setting}. {scene_1} Natural lighting, realistic skin textures, candid unedited smartphone look, clear voices and accurate lip-sync."
+    },
+    {
+      "id": 2,
+      "role": "scene_2",
+      "duration": 15,
+      "use_anchor": false,
+      "generate_audio": true,
+      "prompt_template": "Handheld UGC-style vertical smartphone video inside {setting}. {cast_description} {scene_2} Natural lighting, realistic skin textures, candid unedited smartphone look, clear voices and accurate lip-sync."
+    },
+    {
+      "id": 3,
+      "role": "scene_3",
+      "duration": 10,
+      "use_anchor": false,
+      "generate_audio": true,
+      "prompt_template": "Handheld UGC-style vertical smartphone video inside {setting}. {cast_description} {scene_3} Natural lighting, realistic skin textures, candid unedited smartphone look, clear voices and accurate lip-sync."
+    },
+    {
+      "id": 4,
+      "role": "scene_4",
+      "duration": 10,
+      "use_anchor": false,
+      "generate_audio": true,
+      "prompt_template": "Handheld UGC-style vertical smartphone video inside {setting}. {cast_description} {scene_4} Natural lighting, realistic skin textures, candid unedited smartphone look, clear voices and accurate lip-sync."
+    }
+  ]
+}

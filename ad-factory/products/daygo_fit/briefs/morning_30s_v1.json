@@ -1,0 +1,12 @@
+{
+  "product": "daygo_fit",
+  "campaign": "morning_30s_v1",
+  "anchor_path": "anchors/products/daygo_fit/kitchen_morning.png",
+  "anchor_prompt": "Handheld UGC-style vertical smartphone photo inside a bright modern home kitchen in soft morning daylight, a yoga mat rolled out on the floor beside the kitchen island. A fit woman in her early 30s with dark shoulder-length hair, wearing a sage green sports bra and matching leggings, stands at the island holding her phone and smiling toward the camera. Natural window light, realistic skin textures, candid unedited smartphone look.",
+  "vars": {
+    "setting": "a bright modern home kitchen in soft morning daylight with a yoga mat rolled out beside the kitchen island",
+    "cast_description": "The fit woman in her early 30s with dark shoulder-length hair, wearing a sage green sports bra and matching leggings, stands in the same kitchen.",
+    "scene_1": "She looks straight into the vertical smartphone camera and says brightly, 'I used to skip my workouts every single week.' She steps onto the yoga mat and starts a short bodyweight squat set, then glances back at the camera and adds, 'Until I made it a fifteen-minute morning habit.'",
+    "scene_2": "She finishes the set, picks up her phone from the island, shows the screen to the camera and says, 'Daygo.fit plans my session every morning, so I just show up.' She smiles and says, 'Start your routine with Daygo.fit today.'"
+  }
+}

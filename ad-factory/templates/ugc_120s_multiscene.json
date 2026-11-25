@@ -1,0 +1,98 @@
+{
+  "template_name": "ugc_120s_multiscene",
+  "image_model": "bytedance-seed/seedream-5-5",
+  "video_model": "bytedance/seedance-2.0",
+  "aspect_ratio": "9:16",
+  "resolution": "720p",
+  "total_duration": 120,
+  "shots": [
+    {
+      "id": 1,
+      "role": "scene_1",
+      "duration": 15,
+      "use_anchor": true,
+      "generate_audio": true,
+      "prompt_template": "Handheld UGC-style vertical smartphone video inside {setting}. {scene_1} Natural lighting, realistic skin textures, candid unedited smartphone look, clear voices and accurate lip-sync."
+    },
+    {
+      "id": 2,
+      "role": "scene_2",
+      "duration": 8,
+      "use_anchor": false,
+      "generate_audio": true,
+      "prompt_template": "Handheld UGC-style vertical smartphone video inside {setting}. {cast_description} {scene_2} Natural lighting, realistic skin textures, candid unedited smartphone look, clear voices and accurate lip-sync."
+    },
+    {
+      "id": 3,
+      "role": "scene_3",
+      "duration": 8,
+      "use_anchor": false,
+      "generate_audio": true,
+      "prompt_template": "Handheld UGC-style vertical smartphone video inside {setting}. {cast_description} {scene_3} Natural lighting, realistic skin textures, candid unedited smartphone look, clear voices and accurate lip-sync."
+    },
+    {
+      "id": 4,
+      "role": "scene_4",
+      "duration": 15,
+      "use_anchor": false,
+      "generate_audio": true,
+      "prompt_template": "Handheld UGC-style vertical smartphone video inside {setting}. {cast_description} {scene_4} Natural lighting, realistic skin textures, candid unedited smartphone look, clear voices and accurate lip-sync."
+    },
+    {
+      "id": 5,
+      "role": "scene_5",
+      "duration": 8,
+      "use_anchor": false,
+      "generate_audio": true,
+      "prompt_template": "Handheld UGC-style vertical smartphone video inside {setting}. {cast_description} {scene_5} Natural lighting, realistic skin textures, candid unedited smartphone look, clear voices and accurate lip-sync."
+    },
+    {
+      "id": 6,
+      "role": "scene_6",
+      "duration": 10,
+      "use_anchor": false,
+      "generate_audio": true,
+      "prompt_template": "Handheld UGC-style vertical smartphone video inside {setting}. {cast_description} {scene_6} Natural lighting, realistic skin textures, candid unedited smartphone look, clear voices and accurate lip-sync."
+    },
+    {
+      "id": 7,
+      "role": "scene_7",
+      "duration": 15,
+      "use_anchor": false,
+      "generate_audio": true,
+      "prompt_template": "Handheld UGC-style vertical smartphone video inside {setting}. {cast_description} {scene_7} Natural lighting, realistic skin textures, candid unedited smartphone look, clear voices and accurate lip-sync."
+    },
+    {
+      "id": 8,
+      "role": "scene_8",
+      "duration": 8,
+      "use_anchor": false,
+      "generate_audio": true,
+      "prompt_template": "Handheld UGC-style vertical smartphone video inside {setting}. {cast_description} {scene_8} Natural lighting, realistic skin textures, candid unedited smartphone look, clear voices and accurate lip-sync."
+    },
+    {
+      "id": 9,
+      "role": "scene_9",
+      "duration": 10,
+      "use_anchor": false,
+      "generate_audio": true,
+      "prompt_template": "Handheld UGC-style vertical smartphone video inside {setting}. {cast_description} {scene_9} Natural lighting, realistic skin textures, candid unedited smartphone look, clear voices and accurate lip-sync."
+    },
+    {
+      "id": 10,
+      "role": "scene_10",
+      "duration": 15,
+      "use_anchor": false,
+      "generate_audio": true,
+      "prompt_template": "Handheld UGC-style vertical smartphone video inside {setting}. {cast_description} {scene_10} Natural lighting, realistic skin textures, candid unedited smartphone look, clear voices and accurate lip-sync."
+    },
+    {
+      "id": 11,
+      "role": "scene_11",
+      "duration": 8,
+      "use_anchor": false,
+      "generate_audio": true,
+      "prompt_template": "Handheld UGC-style vertical smartphone video inside {setting}. {cast_description} {scene_11} Natural lighting, realistic skin textures, candid unedited smartphone look, clear voices and accurate lip-sync."
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 {
   "product": "kegeldoc",
-  "campaign": "garage_hook_v1",
-  "anchor_path": "products/kegeldoc/anchors/garage_couple.png",
+  "campaign": "garage_15s_v1",
+  "anchor_path": "anchors/products/kegeldoc/garage_couple.png",
   "anchor_prompt": "Handheld UGC-style vertical smartphone photo inside a residential garage with gray concrete walls, tools hanging on a pegboard, and daylight coming from an open garage door. A visibly muscular, gym-toned shirtless white man in his late 20s with broad shoulders, defined chest, sculpted arms and shoulders, and a lean waist, wearing camo shorts and a backward black baseball cap, stands on a small two-step household stool and holds a white household light bulb clearly in his raised right hand as he reaches up to screw it into a ceiling light fixture. Beside him on the concrete garage floor stands an athletic, fit white woman with a blonde ponytail wearing a grey sports bra and black gym leggings, looking up toward him. Natural overhead garage lighting, realistic skin textures, candid unedited smartphone look, no car in frame.",
   "vars": {
     "setting": "the residential garage with gray concrete walls and daylight from the open door",

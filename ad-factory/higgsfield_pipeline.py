@@ -245,7 +245,7 @@ def main() -> None:
         prompt_text = render_prompt(s["prompt_template"], vars_dict, sid)
         rendered_shots[sid] = (s, prompt_text)
 
-    anchor_path = Path(brief.get("anchor_path") or f"products/{product}/anchors/{campaign}_anchor.png")
+    anchor_path = Path(brief.get("anchor_path") or f"anchors/products/{product}/{campaign}_anchor.png")
     anchor_prompt = brief.get("anchor_prompt", "").strip()
     total_cost = 0.0
 
