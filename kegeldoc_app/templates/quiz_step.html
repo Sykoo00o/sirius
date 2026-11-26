@@ -234,35 +234,7 @@
 {% block footer %}{% endblock %}
 
 {% block scripts %}
-<script>
-(function () {
-  var form = document.getElementById('quiz-form');
-  if (!form) return;
-  var noteless = !document.getElementById('note');
-  // Single and scale: submit on tap after a beat, so the selected colour is seen before the page
-  // changes; without the beat a tap reads as dropped and invites a second one. One submit only.
-  var submitted = false;
-  form.querySelectorAll('input[data-autosubmit="true"]').forEach(function (input) {
-    input.addEventListener('change', function () {
-      if (submitted || !noteless) return;
-      submitted = true;
-      setTimeout(function () { form.requestSubmit ? form.requestSubmit() : form.submit(); }, 260);
-    });
-  });
-  // Multi: the exclusive option ("None of these") clears the others, and any other clears it.
-  var exclusive = form.dataset.exclusive;
-  if (form.dataset.kind === 'multi' && exclusive) {
-    var boxes = form.querySelectorAll('input[type="checkbox"]');
-    boxes.forEach(function (box) {
-      box.addEventListener('change', function () {
-        if (!box.checked) return;
-        boxes.forEach(function (other) {
-          if (other === box) return;
-          if (box.value === exclusive || other.value === exclusive) other.checked = false;
-        });
-      });
-    });
-  }
-})();
-</script>
+{# Tap-to-continue, "None of these", and answering without a page load: static/quiz.js. With
+   JavaScript off the form posts and the server redirects, exactly as before. #}
+<script src="/static/quiz.js?v={{ asset_v }}" defer></script>
 {% endblock %}

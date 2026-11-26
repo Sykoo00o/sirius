@@ -105,7 +105,7 @@ def _asset_version(*names: str) -> str:
     return digest.hexdigest()[:10]
 
 
-templates.env.globals["asset_v"] = _asset_version("kegeldoc.css", "app.css", "logo-horizontal.svg",
+templates.env.globals["asset_v"] = _asset_version("kegeldoc.css", "app.css", "quiz.js", "logo-horizontal.svg",
                                                   "favicon.svg", "favicon-32.png", "apple-touch-icon.png")
 store = ResponseStore(settings.database_abspath)
 billing_store = BillingStore(settings.billing_database_abspath)
@@ -472,6 +472,37 @@ async def onboarding_step(request: Request, index: int) -> HTMLResponse:
     return await render_step(request, flow[index], index, stored, errors=[])
 
 
+#: Sent by `static/quiz.js` when it will swap the next screen into the page itself instead of
+#: following a redirect. Only changes the *shape* of the reply, never what is stored.
+SWAP_HEADER = "x-kd-swap"
+_STEP_URL = re.compile(r"/onboarding/(\d+)")
+
+
+def _wants_swap(request: Request) -> bool:
+    return request.headers.get(SWAP_HEADER) == "1"
+
+
+async def go_to(request: Request, url: str, stored: dict[str, list[str]]) -> Response:
+    """Where a quiz POST sends the visitor next.
+
+    A normal form post gets the 302 it always got. A swap request gets the next screen in the
+    same reply (one round trip instead of two), with its address in `X-KD-URL` for the history
+    entry, or, when the next stop is not a quiz screen, a 204 naming it in `X-KD-Location` so
+    the script does an ordinary navigation there. Same destination either way.
+    """
+    if not _wants_swap(request):
+        return RedirectResponse(url=url, status_code=302)
+    match = _STEP_URL.fullmatch(url)
+    if match:
+        index, flow = int(match.group(1)), flow_for(stored)
+        if 0 <= index < len(flow):
+            response = await render_step(request, flow[index], index, stored, errors=[])
+            response.headers["X-KD-URL"] = url
+            response.headers["Cache-Control"] = "no-store"
+            return response
+    return Response(status_code=204, headers={"X-KD-Location": url, "Cache-Control": "no-store"})
+
+
 async def render_step(request: Request, question: Any, index: int,
                       stored: dict[str, list[str]], *, errors: list[str],
                       status_code: int = 200) -> HTMLResponse:
@@ -522,7 +553,7 @@ async def onboarding_submit(
     question = flow[index]
     reached = next_unanswered(stored)
     if index > reached:
-        return RedirectResponse(url=f"/onboarding/{reached}", status_code=302)
+        return await go_to(request, f"/onboarding/{reached}", stored)
 
     # Multi-select inputs are named after the question key, which varies per route, so the
     # posted form is the read for those; FastAPI has already drained the body to inject
@@ -570,10 +601,10 @@ async def onboarding_submit(
 
     # Every step posts to its own route, so an invalid answer can 422 the page the
     # visitor is actually on rather than the one it was submitted from.
-    return RedirectResponse(
-        url="/analysing" if is_complete(stored) else f"/onboarding/{next_unanswered(stored)}",
-        status_code=302,
-    )
+    return await go_to(
+        request,
+        "/analysing" if is_complete(stored) else f"/onboarding/{next_unanswered(stored)}",
+        stored)
 
 
 # ---------------------------------------------------------------------------
