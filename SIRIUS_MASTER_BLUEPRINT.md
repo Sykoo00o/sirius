@@ -99,6 +99,9 @@ async def telegram_webhook(update: dict[str, Any] = Body(...), store: FinanceSto
 - **Implemented:** <what changed, file(s)>
 - **Verified:** <syntax check, systemd restart, API response, etc.>
 -->
+### 2026-11-26 — kegeldoc mobile animation fix DEPLOYED to `kegeldoc.fit`
+- **Git commit:** `57c5a57` pushed to `origin/main`, pulled fast-forward on the VPS; `kegeldoc-app` restarted, active, `/health` `"failures": 0`.
+- **Verified:** live home page carries the `is-ready`, `touchstart` and `onpagereveal` script; live `kegeldoc.css?v=ea95350ebc` carries the first-paint gating, `(hover: none)` and `user-select: none` rules. Scripted full men's walk on kegeldoc.fit: charts, analysis, compatibility 96 Excellent, paywall with timer, checkout and rehearsal submit all 200. iPhone 17 Pro simulator Safari loads `https://kegeldoc.fit/onboarding/0` with the photo gender picker.
 ### 2026-11-26 — kegeldoc: animations now play on phones (local; not yet deployed)
 - **Git commit:** see the commit carrying this entry.
 - **Root cause (reproduced in iPhone 17 Pro simulator Safari, iOS 26.5, frames pulled from a screen recording):** phones keep the previous page on screen until the next has loaded, while a CSS animation's clock starts when the page's styles arrive, so the 0.35–0.8s entrances had finished before the page was first shown; on desktop the page paints at once, which is why it looked fine there. Also: iOS Safari ignores `:active` (no press feedback) unless the page listens for touches; hover-only effects never play on touch and can stick after a tap; a slightly long press on an answer card started iOS text selection instead of choosing it; and `prefers-reduced-motion` cancelled every animation outright.
