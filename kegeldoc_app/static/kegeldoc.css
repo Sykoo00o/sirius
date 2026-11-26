@@ -268,8 +268,10 @@ a, button, label, input { touch-action: manipulation; }
 html.js .reveal { opacity: 0; transform: translateY(18px); transition: opacity .6s ease, transform .7s var(--ease); transition-delay: calc(var(--i, 0) * 120ms); }
 html.js .reveal.is-visible { opacity: 1; transform: none; }
 @media (prefers-reduced-motion: reduce) {
+  /* Scroll reveals are simply shown: content further down never waits on an effect. The page
+     entrances keep a plain fade (see the end of this file). */
   html.js .reveal { opacity: 1; transform: none; transition: none; }
-  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
+  html { scroll-behavior: auto; }
 }
 
 /* =====================================================================
@@ -593,8 +595,71 @@ html.js .autosubmit-cta { display: none; }
 @keyframes vtOut { to { opacity: 0; transform: translateY(-6px); } }
 @keyframes vtIn { from { opacity: 0; transform: translateY(10px); } }
 
-@media (prefers-reduced-motion: reduce) {
-  .hero-in, .hero-phone-wrap, .hero-phone-wrap .phone, .hero-cta .btn-cta, .kd .option, .kd .option.photo-opt { animation: none !important; }
+
+
+/* ---------- phones and tablets ---------- */
+/* Hover does not exist on touch screens, and a tapped element can keep its hover style until the
+   next tap ("sticky hover"), leaving a button lifted or a card zoomed. Undo the hover looks there;
+   the press feedback below replaces them. */
+@media (hover: none) {
+  .btn-cta:hover { transform: none; box-shadow: 0 10px 24px -8px rgba(232,85,26,.55); }
   .btn-cta:hover::after { animation: none; }
-  ::view-transition-old(root), ::view-transition-new(root) { animation: none; }
+  .kd .option:hover { background: #fff; }
+  .kd .option.photo-opt:hover { box-shadow: 0 1px 2px rgba(43,17,69,.06), 0 10px 24px -14px rgba(43,17,69,.28); }
+  .kd .option.photo-opt:hover .po-photo img { transform: none; }
+  .plan-opt:hover { background: #fff; }
+  .btn-dark:hover { background: var(--ink); }
 }
+/* A tap gets the light sweep too. (iOS only shows :active because base.html listens for touches.) */
+.btn-cta:active::after { animation: shine .6s var(--ease); }
+
+/* Browsers without cross-document view transitions (older iOS, in-app browsers): base.html adds
+   `no-vt`, fades the page out on a link or form submit, and the next page fades in. */
+@keyframes pageIn { from { opacity: 0; transform: translateY(10px); } }
+html.no-vt main { animation: pageIn .35s var(--ease) backwards; }
+html.no-vt.is-leaving main { opacity: 0; transform: translateY(-6px); transition: opacity .14s ease, transform .14s ease; }
+
+/* ---------- Reduce Motion ---------- */
+/* People who turn on Reduce Motion still see things appear, but nothing travels, floats or
+   scales: each movement keyframe is redefined as a plain fade (the last @keyframes of a name
+   wins), and presses dim instead of shrinking. */
+@media (prefers-reduced-motion: reduce) {
+  @keyframes heroIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes optIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes screenIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes pageIn { from { opacity: 0; } }
+  @keyframes vtOut { to { opacity: 0; } }
+  @keyframes vtIn { from { opacity: 0; } }
+  @keyframes floatY { from, to { transform: none; } }
+  @keyframes ctaGlow { from, to { box-shadow: 0 10px 24px -8px rgba(232,85,26,.55); } }
+  @keyframes shine { from, to { transform: translateX(-120%) skewX(-20deg); } }
+  .btn-cta:hover, .btn-cta:active, .btn-dark:active, .kd .option:active, .plan-opt:active { transform: none; }
+  .btn-cta:active, .btn-dark:active, .kd .option:active, .plan-opt:active { filter: brightness(.93); }
+  .kd .option.photo-opt:hover .po-photo img, .kd .option.photo-opt:has(input:checked) .po-photo img { transform: none; }
+  html.no-vt.is-leaving main { transform: none; }
+}
+
+/* ---------- start entrances on the first painted frame ---------- */
+/* Phones keep showing the previous page until the next one has loaded ("paint holding"), and a
+   CSS animation starts its clock when the page's styles arrive, not when it is first shown. On a
+   slower connection a 0.4s entrance had finished before the page appeared, so on mobile it
+   looked as if nothing animated. Until base.html marks the page `is-ready` (two animation frames
+   after the first paint, or 2.5s at the latest), these elements wait hidden with no animation;
+   adding the class gives them their animation, which then plays from the start, on screen. */
+html.js:not(.is-ready) .hero-in,
+html.js:not(.is-ready) .hero-phone-wrap,
+html.js:not(.is-ready) .kd .options .option,
+html.js:not(.is-ready) .screen-in,
+html.js:not(.is-ready) .compat-ring .arc,
+html.js:not(.is-ready) .compat-ring .label b,
+html.js:not(.is-ready) .chart-track i,
+html.js:not(.is-ready) .illo .rep,
+html.no-vt:not(.is-ready) main { animation: none !important; opacity: 0; }
+
+/* ---------- tap targets: no text selection or image callouts ---------- */
+/* A slightly long press on an answer card made iOS start selecting nearby text instead of
+   choosing the card. Choices and buttons are not text to copy. */
+.kd .option, .plan-opt, .btn-cta, .btn-dark, .icon-btn {
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+}
+.po-photo img { -webkit-user-drag: none; pointer-events: none; }

@@ -350,9 +350,9 @@ details[open] .caret { transform: rotate(180deg); }
    none }` rule that would have cancelled the reveal on the way to cancelling decoration.
    State changes (option selected, CTA pressed) lose their easing, which is the point. */
 @media (prefers-reduced-motion: reduce) {
+  /* Transitions lose their easing here; animations are left to kegeldoc.css, which turns every
+     movement into a plain fade for Reduce Motion rather than cancelling it outright. */
   *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
