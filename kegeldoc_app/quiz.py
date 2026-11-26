@@ -108,7 +108,7 @@ class Question:
     art: str = "floor"
     #: Study screens: the key of a chart in `CHARTS`, drawn from the cited paper's own figures.
     chart: str = ""
-    #: Single-choice: render the tall icon rows (the track picker).
+    #: Single-choice: render side-by-side photo cards (the gender picker).
     icons: bool = False
     #: Multi-select: the value that clears every other choice ("None of these").
     exclusive: str = ""
@@ -169,10 +169,9 @@ def _women(a: Answers) -> bool:
 
 BANK: tuple[Question, ...] = (
     # ---- about you -----------------------------------------------------------------------
-    Question("track", "about", "Who is this plan for?",
+    Question("track", "about", "What is your gender?",
              "Pelvic floor anatomy differs, so the exercises and cues do too.",
-             options=(("men", "Men"), ("women", "Women")), icons=True,
-             subs={"men": "Erections, control, bladder", "women": "Leaks, recovery, sensation"}),
+             options=(("men", "Male"), ("women", "Female")), icons=True),
     Question("age", "about", "How old are you?",
              "Muscle tone changes with age. It changes your starting holds, not whether this "
              "works for you.",

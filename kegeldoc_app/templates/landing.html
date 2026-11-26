@@ -22,17 +22,17 @@
 
     <div class="measure" style="position:relative">
       {% set accent = 'Strengthen' %}
-      <h1 id="hero-h" class="display">
+      <h1 id="hero-h" class="display hero-in" style="--d:60ms">
         {%- if copy.hero_headline.startswith(accent) -%}
           <span class="grad-text">{{ accent }}</span>{{ copy.hero_headline[accent | length:] }}
         {%- else -%}{{ copy.hero_headline }}{%- endif -%}
       </h1>
-      <p class="lead" style="margin-top:20px">Kegel plans for men and women. Five quiet minutes a day, guided second by second, built around your body and your goal.</p>
-      <div style="margin-top:36px">
+      <p class="lead hero-in" style="margin-top:20px;--d:200ms">Kegel plans for men and women. Five quiet minutes a day, guided second by second, built around your body and your goal.</p>
+      <div class="hero-in hero-cta" style="margin-top:36px;--d:340ms">
         <a class="btn-cta" href="/onboarding">{{ copy.primary_cta }} <span aria-hidden="true">&rarr;</span></a>
       </div>
-      <p class="muted" style="margin-top:14px;font-size:14px">{{ copy.cta_fine_print }}</p>
-      <ul class="hero-disclosures">
+      <p class="muted hero-in" style="margin-top:14px;font-size:14px;--d:460ms">{{ copy.cta_fine_print }}</p>
+      <ul class="hero-disclosures hero-in" style="--d:540ms">
         {% for key, text in copy.disclosures.items() %}
           {% if key in ('price_line', 'cancel_line', 'refund_line') %}<li>{{ text }}</li>{% endif %}
         {% endfor %}

@@ -168,11 +168,32 @@
         <div class="scale-ends"><span>{{ question.low }}</span><span>{{ question.high }}</span></div>
       </fieldset>
 
+    {% elif question.icons %}
+      {# The gender picker: two photo cards side by side. The photos are decorative (the label
+         names the choice), cropped above the shirts so no third-party logo appears. #}
+      <fieldset class="options photo-grid">
+        <legend class="sr-only">{{ question.title }}</legend>
+        {% for value, label in question.options %}
+          {% set img = 'q-male' if value == 'men' else 'q-female' %}
+          <label class="option photo-opt" for="opt-{{ value }}" style="--i:{{ loop.index0 }}">
+            <input type="radio" name="answer" id="opt-{{ value }}" value="{{ value }}"
+                   data-autosubmit="true" {% if value in answered %}checked{% endif %}>
+            <span class="po-photo" aria-hidden="true">
+              <picture>
+                <source srcset="/static/img/{{ img }}.webp?v={{ asset_v }}" type="image/webp">
+                <img src="/static/img/{{ img }}.jpg?v={{ asset_v }}" alt="" width="440" height="550" decoding="async"{% if loop.first %} fetchpriority="high"{% endif %}>
+              </picture>
+            </span>
+            <span class="po-name"><span class="po-radio" aria-hidden="true"></span>{{ label }}</span>
+          </label>
+        {% endfor %}
+      </fieldset>
+
     {% else %}
       <fieldset class="options">
         <legend class="sr-only">{{ question.title }}</legend>
         {% for value, label in question.options %}
-          <label class="option{% if question.icons %} tall{% endif %}" for="opt-{{ value }}">
+          <label class="option{% if question.icons %} tall{% endif %}" for="opt-{{ value }}" style="--i:{{ loop.index0 }}">
             <input type="{{ 'checkbox' if question.kind == 'multi' else 'radio' }}"
                    name="{{ question.key if question.kind == 'multi' else 'answer' }}"
                    id="opt-{{ value }}" value="{{ value }}"

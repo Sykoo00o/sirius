@@ -38,7 +38,13 @@ img, svg { display: block; max-width: 100%; }
 a { color: inherit; }
 h1, h2, h3, p { margin: 0; }
 button { font: inherit; color: inherit; }
-:focus-visible { outline: 3px solid var(--teal); outline-offset: 3px; border-radius: 12px; }
+/* Keyboard focus only, in the element's own shape. (It used to force border-radius: 12px, which
+   squared off the pill buttons whenever they took focus — the "strange outline" on Get my plan.) */
+:focus-visible { outline: 3px solid var(--teal); outline-offset: 3px; }
+:focus:not(:focus-visible) { outline: none; }
+/* No grey tap-highlight box on phones; the buttons have their own press feedback below. */
+html { -webkit-tap-highlight-color: transparent; }
+a, button, label, input { touch-action: manipulation; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* ---------- header ---------- */
@@ -259,10 +265,10 @@ button { font: inherit; color: inherit; }
 .site-footer .disclaimer { margin-top: 24px; max-width: 820px; }
 
 /* ---------- reveal (simple.life: opacity .5s, staggered) ---------- */
-html.js .reveal { opacity: 0; transition: opacity .5s ease; transition-delay: calc(var(--i, 0) * 120ms); }
-html.js .reveal.is-visible { opacity: 1; }
+html.js .reveal { opacity: 0; transform: translateY(18px); transition: opacity .6s ease, transform .7s var(--ease); transition-delay: calc(var(--i, 0) * 120ms); }
+html.js .reveal.is-visible { opacity: 1; transform: none; }
 @media (prefers-reduced-motion: reduce) {
-  html.js .reveal { opacity: 1; transition: none; }
+  html.js .reveal { opacity: 1; transform: none; transition: none; }
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
 }
 
@@ -522,3 +528,73 @@ html.js .autosubmit-cta { display: none; }
 .fact.study .src { margin-top: 8px; font-size: 11px; line-height: 15px; }
 .quiz-main:has(.fact.study) { padding-top: 12px; }
 .quiz-main:has(.fact.study) .quiz-cta { margin-top: 4px; padding-top: 12px; }
+
+
+/* ---------- quiz screen 1: gender photo cards ---------- */
+.photo-grid { grid-template-columns: 1fr 1fr; gap: 12px; }
+.kd .option.photo-opt {
+  position: relative; flex-direction: column; align-items: stretch; gap: 0; min-height: 0; padding: 0;
+  border-radius: 22px; overflow: hidden; background: #fff; text-align: center;
+  box-shadow: 0 1px 2px rgba(43,17,69,.06), 0 10px 24px -14px rgba(43,17,69,.28);
+  transition: border-color .18s ease, box-shadow .25s var(--ease), transform .18s var(--ease);
+  animation: optIn .45s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 80ms + 60ms);
+}
+.po-photo { position: relative; display: block; aspect-ratio: 4 / 5; overflow: hidden; background: var(--band); }
+.po-photo img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 18%; display: block;
+  transition: transform .45s var(--ease), filter .3s ease; }
+/* The photo melts into the card: a soft fade to white at the bottom, where the name sits. */
+.po-photo::after { content: ""; position: absolute; inset: auto 0 0 0; height: 42%;
+  background: linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,.55) 55%, #fff 100%); }
+.po-name { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; gap: 10px;
+  margin-top: -30px; padding: 0 12px 16px; font-size: 18px; line-height: 24px; font-weight: 700; color: var(--ink); }
+.po-radio { width: 20px; height: 20px; border-radius: 50%; border: 2px solid #DCCBD8; background: #fff; flex: none;
+  transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease; }
+.kd .option.photo-opt:hover { background: #fff; box-shadow: 0 2px 4px rgba(43,17,69,.06), 0 18px 34px -16px rgba(43,17,69,.35); }
+.kd .option.photo-opt:hover .po-photo img { transform: scale(1.04); }
+.kd .option.photo-opt:has(input:checked) { border-color: var(--teal); background: #fff; box-shadow: 0 0 0 4px rgba(232,85,26,.14), 0 18px 34px -16px rgba(43,17,69,.35); }
+.kd .option.photo-opt:has(input:checked) .po-radio { border-color: var(--teal); background: var(--teal); box-shadow: inset 0 0 0 4px #fff; }
+.kd .option.photo-opt:has(input:checked) .po-photo img { transform: scale(1.06); }
+@media (max-width: 340px) { .po-name { font-size: 16px; } }
+
+/* ---------- motion: entrance, press, transitions ---------- */
+@keyframes optIn { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes heroIn { from { opacity: 0; transform: translateY(22px); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes floatY { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+@keyframes ctaGlow { 0%, 100% { box-shadow: 0 10px 24px -8px rgba(232,85,26,.55); } 50% { box-shadow: 0 14px 34px -8px rgba(219,36,99,.6), 0 0 0 8px rgba(255,107,44,.10); } }
+@keyframes shine { from { transform: translateX(-120%) skewX(-20deg); } to { transform: translateX(260%) skewX(-20deg); } }
+
+/* Home hero: headline, lead, button and fine print rise in one after another. */
+.hero-in { animation: heroIn .8s var(--ease) both; animation-delay: var(--d, 0ms); }
+.hero-phone-wrap { animation: heroIn 1s var(--ease) .35s both; }
+.hero-phone-wrap .phone { animation: floatY 6s ease-in-out 1.4s infinite; }
+.hero-cta .btn-cta { animation: ctaGlow 2.8s ease-in-out 1.6s infinite; }
+
+/* Buttons: a light sweep on hover and a quick, springy press. */
+.btn-cta { overflow: hidden; }
+.btn-cta::after { content: ""; position: absolute; inset: 0 auto 0 0; width: 40%; z-index: -1; pointer-events: none;
+  background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.28), rgba(255,255,255,0));
+  transform: translateX(-120%) skewX(-20deg); }
+.btn-cta:hover::after { animation: shine .9s var(--ease); }
+.btn-cta:active, .btn-dark:active { transform: scale(.96); transition-duration: .08s; }
+.btn-cta:active { box-shadow: 0 4px 12px -6px rgba(232,85,26,.5); }
+
+/* Quiz options and plan cards: rise in, in order, and give under a tap. */
+.kd .options:not(.photo-grid) .option { animation: optIn .35s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 45ms + 40ms); }
+.kd .option { transition: background-color .15s ease, border-color .15s ease, transform .15s var(--ease); }
+.kd .option:active, .plan-opt:active { transform: scale(.98); transition-duration: .08s; }
+.plan-opt { transition: border-color .15s ease, background-color .15s ease, transform .15s var(--ease), box-shadow .2s ease; }
+
+/* Page-to-page transitions (Chrome, Edge, Safari 18.2+; other browsers just load the page). The
+   header keeps its place while the content cross-fades and lifts. */
+@view-transition { navigation: auto; }
+.site-header, .quiz-top { view-transition-name: kd-header; }
+::view-transition-old(root) { animation: vtOut .18s ease both; }
+::view-transition-new(root) { animation: vtIn .32s var(--ease) both; }
+@keyframes vtOut { to { opacity: 0; transform: translateY(-6px); } }
+@keyframes vtIn { from { opacity: 0; transform: translateY(10px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-in, .hero-phone-wrap, .hero-phone-wrap .phone, .hero-cta .btn-cta, .kd .option, .kd .option.photo-opt { animation: none !important; }
+  .btn-cta:hover::after { animation: none; }
+  ::view-transition-old(root), ::view-transition-new(root) { animation: none; }
+}
