@@ -99,6 +99,9 @@ async def telegram_webhook(update: dict[str, Any] = Body(...), store: FinanceSto
 - **Implemented:** <what changed, file(s)>
 - **Verified:** <syntax check, systemd restart, API response, etc.>
 -->
+### 2026-11-26 — kegeldoc button glow and quiz transition fix DEPLOYED to `kegeldoc.fit`
+- **Git commit:** `d5d9628` pushed to `origin/main`, pulled fast-forward on the VPS; `kegeldoc-app` restarted, active, `/health` `"failures": 0`.
+- **Verified:** live home page links `kegeldoc.css?v=6af0932816`, which carries `glowPulse`, the `.btn-cta:hover:not(:active)` touch reset and the pinned quiz-header view transition. Scripted full men's walk on kegeldoc.fit: charts, analysis, compatibility 96 Excellent, paywall with timer, checkout and rehearsal submit all 200.
 ### 2026-11-26 — kegeldoc: Get my plan button glitch and quiz jitter fixed for phones (local; not yet deployed)
 - **Git commit:** see the commit carrying this entry.
 - **Found (iPhone 17 Pro simulator, frames from screen recordings):** the hero button's pulse animated `box-shadow` with an 8px spread ring, which on a phone read as a pale outline flickering around the pill, and repainted every frame; the tap sweep was a transformed bar clipped by `overflow: hidden`, which iOS Safari does not clip to rounded corners; the `(hover: none)` reset (`.btn-cta:hover`) came after `:active` with equal specificity and cancelled the press on touch. Quiz jitter: the page root slid 10px, the form slid 6px and each option slid 10px and scaled .98 — three offsets at different timings plus text re-rasterising — and the home and quiz headers shared a view-transition name at different sizes, so Safari morphed one into the other.
