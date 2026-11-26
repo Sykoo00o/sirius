@@ -1,0 +1,5 @@
+# AG-UI gateway, phase 0. Pinned to what the tests ran against.
+ag-ui-protocol==1.0.0
+fastapi>=0.115
+httpx>=0.27
+uvicorn>=0.30
