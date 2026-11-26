@@ -289,8 +289,9 @@ body.quiz-body { background: var(--canvas); min-height: 100vh; min-height: 100dv
 .step-count { font-size: 13px; font-weight: 600; color: var(--ink-60); min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
 
 .quiz-main { max-width: 480px; margin: 0 auto; padding: 24px 20px 48px; }
-.screen-in { animation: screenIn .3s var(--ease) both; }
-@keyframes screenIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.screen-in { animation: screenIn .3s ease both; }
+/* A plain fade: the answers below carry the only movement, so nothing on screen moves at two speeds. */
+@keyframes screenIn { from { opacity: 0; } to { opacity: 1; } }
 .q-title { font-size: 28px; line-height: 34px; font-weight: 700; letter-spacing: -.6px; text-wrap: balance; }
 .q-help { margin-top: 10px; color: var(--ink-60); }
 .options { display: grid; gap: 8px; margin-top: 28px; }
@@ -559,29 +560,34 @@ html.js .autosubmit-cta { display: none; }
 @media (max-width: 340px) { .po-name { font-size: 16px; } }
 
 /* ---------- motion: entrance, press, transitions ---------- */
-@keyframes optIn { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
-@keyframes heroIn { from { opacity: 0; transform: translateY(22px); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes optIn { from { opacity: 0; transform: translate3d(0, 8px, 0); } to { opacity: 1; transform: none; } }
+@keyframes heroIn { from { opacity: 0; transform: translate3d(0, 18px, 0); } to { opacity: 1; transform: none; } }
 @keyframes floatY { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
-@keyframes ctaGlow { 0%, 100% { box-shadow: 0 10px 24px -8px rgba(232,85,26,.55); } 50% { box-shadow: 0 14px 34px -8px rgba(219,36,99,.6), 0 0 0 8px rgba(255,107,44,.10); } }
-@keyframes shine { from { transform: translateX(-120%) skewX(-20deg); } to { transform: translateX(260%) skewX(-20deg); } }
+@keyframes glowPulse { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+@keyframes shine { from { background-position: 130% 0; } to { background-position: -30% 0; } }
 
 /* Home hero: headline, lead, button and fine print rise in one after another. */
 .hero-in { animation: heroIn .8s var(--ease) both; animation-delay: var(--d, 0ms); }
 .hero-phone-wrap { animation: heroIn 1s var(--ease) .35s both; }
 .hero-phone-wrap .phone { animation: floatY 6s ease-in-out 1.4s infinite; }
-.hero-cta .btn-cta { animation: ctaGlow 2.8s ease-in-out 1.6s infinite; }
+/* The hero button breathes: a soft shadow on its own layer fades in and out. Only opacity moves,
+   so phones animate it without repainting, and there is no ring that could read as an outline. */
+.hero-cta .btn-cta::before { content: ""; position: absolute; inset: 0; border-radius: inherit; z-index: -2;
+  pointer-events: none; box-shadow: 0 16px 36px -10px rgba(219,36,99,.55); opacity: 0;
+  animation: glowPulse 2.8s ease-in-out 1.6s infinite; }
 
 /* Buttons: a light sweep on hover and a quick, springy press. */
-.btn-cta { overflow: hidden; }
-.btn-cta::after { content: ""; position: absolute; inset: 0 auto 0 0; width: 40%; z-index: -1; pointer-events: none;
-  background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.28), rgba(255,255,255,0));
-  transform: translateX(-120%) skewX(-20deg); }
+.btn-cta::after { content: ""; position: absolute; inset: 0; border-radius: inherit; z-index: -1; pointer-events: none;
+  /* The sweep moves by background-position inside the button's own rounded shape. (A transformed
+     bar clipped by overflow: hidden escaped the rounded corners in iOS Safari.) */
+  background: linear-gradient(105deg, rgba(255,255,255,0) 35%, rgba(255,255,255,.32) 50%, rgba(255,255,255,0) 65%) no-repeat;
+  background-size: 250% 100%; background-position: 130% 0; }
 .btn-cta:hover::after { animation: shine .9s var(--ease); }
 .btn-cta:active, .btn-dark:active { transform: scale(.96); transition-duration: .08s; }
 .btn-cta:active { box-shadow: 0 4px 12px -6px rgba(232,85,26,.5); }
 
 /* Quiz options and plan cards: rise in, in order, and give under a tap. */
-.kd .options:not(.photo-grid) .option { animation: optIn .35s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 45ms + 40ms); }
+.kd .options:not(.photo-grid) .option { animation: optIn .4s cubic-bezier(.22,.8,.3,1) backwards; animation-delay: calc(var(--i, 0) * 40ms + 60ms); }
 .kd .option { transition: background-color .15s ease, border-color .15s ease, transform .15s var(--ease); }
 .kd .option:active, .plan-opt:active { transform: scale(.98); transition-duration: .08s; }
 .plan-opt { transition: border-color .15s ease, background-color .15s ease, transform .15s var(--ease), box-shadow .2s ease; }
@@ -589,11 +595,16 @@ html.js .autosubmit-cta { display: none; }
 /* Page-to-page transitions (Chrome, Edge, Safari 18.2+; other browsers just load the page). The
    header keeps its place while the content cross-fades and lifts. */
 @view-transition { navigation: auto; }
-.site-header, .quiz-top { view-transition-name: kd-header; }
-::view-transition-old(root) { animation: vtOut .18s ease both; }
-::view-transition-new(root) { animation: vtIn .32s var(--ease) both; }
-@keyframes vtOut { to { opacity: 0; transform: translateY(-6px); } }
-@keyframes vtIn { from { opacity: 0; transform: translateY(10px); } }
+.quiz-top { view-transition-name: kd-header; }
+/* Between quiz screens the header simply stays: no cross-fade, no size morph. (The home header is
+   a different size, so it is not paired with the quiz header and just fades with the page.) */
+::view-transition-group(kd-header) { animation-duration: 0s; }
+::view-transition-old(kd-header) { display: none; }
+::view-transition-new(kd-header) { animation: none; }
+::view-transition-old(root) { animation: vtOut .16s ease both; }
+::view-transition-new(root) { animation: vtIn .26s ease both; }
+@keyframes vtOut { to { opacity: 0; } }
+@keyframes vtIn { from { opacity: 0; } }
 
 
 
@@ -602,7 +613,7 @@ html.js .autosubmit-cta { display: none; }
    next tap ("sticky hover"), leaving a button lifted or a card zoomed. Undo the hover looks there;
    the press feedback below replaces them. */
 @media (hover: none) {
-  .btn-cta:hover { transform: none; box-shadow: 0 10px 24px -8px rgba(232,85,26,.55); }
+  .btn-cta:hover:not(:active) { transform: none; box-shadow: 0 10px 24px -8px rgba(232,85,26,.55); }
   .btn-cta:hover::after { animation: none; }
   .kd .option:hover { background: #fff; }
   .kd .option.photo-opt:hover { box-shadow: 0 1px 2px rgba(43,17,69,.06), 0 10px 24px -14px rgba(43,17,69,.28); }
@@ -631,8 +642,8 @@ html.no-vt.is-leaving main { opacity: 0; transform: translateY(-6px); transition
   @keyframes vtOut { to { opacity: 0; } }
   @keyframes vtIn { from { opacity: 0; } }
   @keyframes floatY { from, to { transform: none; } }
-  @keyframes ctaGlow { from, to { box-shadow: 0 10px 24px -8px rgba(232,85,26,.55); } }
-  @keyframes shine { from, to { transform: translateX(-120%) skewX(-20deg); } }
+  @keyframes glowPulse { from, to { opacity: 0; } }
+  @keyframes shine { from, to { background-position: 130% 0; } }
   .btn-cta:hover, .btn-cta:active, .btn-dark:active, .kd .option:active, .plan-opt:active { transform: none; }
   .btn-cta:active, .btn-dark:active, .kd .option:active, .plan-opt:active { filter: brightness(.93); }
   .kd .option.photo-opt:hover .po-photo img, .kd .option.photo-opt:has(input:checked) .po-photo img { transform: none; }
