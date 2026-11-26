@@ -2802,7 +2802,14 @@ async def run_chat_turn(store: FinanceStore, prompt: str, *,
                                            or json.dumps(tc.arguments)}}
                              for i, tc in enumerate(completion.tool_calls)]})
         for i, tc in enumerate(completion.tool_calls):
-            result = run_tool(store, tc.name, tc.arguments, parse_error=tc.parse_error)
+            # `specs` is enforced here, not only advertised: a model can name a tool it was
+            # never handed, and `run_tool` would execute any registered one, writers included.
+            if tc.name not in allowed:
+                result = {"ok": False, "error": f"tool {tc.name!r} is not available in this "
+                                                "conversation; nothing was changed"}
+                log.warning("chat turn refused unoffered tool %s", tc.name)
+            else:
+                result = run_tool(store, tc.name, tc.arguments, parse_error=tc.parse_error)
             results.append({"name": tc.name, **result})
             slice_left = int((MAX_CHAT_CONTEXT_CHARS - used_chars)
                              * TOOL_RESULT_BUDGET_FRACTION)
@@ -2857,6 +2864,63 @@ async def handle_telegram_plain_english(store: FinanceStore, text: str) -> str:
                                       TG_LLM_HISTORY_MESSAGES, text)
     context = await asyncio.to_thread(_ledger_snapshot, store)
     return await run_chat_turn(store, text[:1500], history=history, context=context)
+
+
+# ---------------------------------------------------------------------------
+# Read-only chat over HTTP (for the AG-UI gateway)
+# ---------------------------------------------------------------------------
+
+#: The only tool the HTTP chat path may run. Approve/reject stay on Telegram buttons and
+#: /approve, where a human taps the exact id.
+CHAT_HTTP_SPECS: tuple[str, ...] = (TOOL_GET_PENDING,)
+CHAT_HTTP_MAX_HISTORY = TG_LLM_HISTORY_MESSAGES
+CHAT_HTTP_MAX_CHARS = 1500
+
+
+def _chat_http_authorised(authorization: str | None) -> None:
+    """Bearer `FINANCE_CHAT_TOKEN`, constant-time. Unset token -> 503: the route is closed, not
+    open, until someone configures it. This app listens on 0.0.0.0 and has unauthenticated
+    routes already; this one must not join them."""
+    expected = os.getenv("FINANCE_CHAT_TOKEN", "").strip()
+    if not expected:
+        raise HTTPException(503, "FINANCE_CHAT_TOKEN is not configured; chat over HTTP is off")
+    scheme, _, supplied = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not hmac.compare_digest(supplied.strip().encode(),
+                                                             expected.encode()):
+        raise HTTPException(401, "missing or wrong bearer token",
+                            headers={"WWW-Authenticate": "Bearer"})
+
+
+def _chat_http_history(raw: Any) -> list[dict[str, str]]:
+    """Client history, reduced to plain user/assistant text. Anything else is dropped: the
+    caller is a browser, and a `system` or `tool` turn from it must not reach the model."""
+    if not isinstance(raw, list):
+        return []
+    out = [{"role": item["role"], "content": item["content"][:CHAT_HTTP_MAX_CHARS]}
+           for item in raw
+           if isinstance(item, dict) and item.get("role") in ("user", "assistant")
+           and isinstance(item.get("content"), str) and item["content"].strip()]
+    return out[-CHAT_HTTP_MAX_HISTORY:]
+
+
+@app.post("/chat/ask")
+async def chat_ask(body: dict[str, Any] = Body(...),
+                   authorization: str | None = Header(default=None),
+                   store: FinanceStore = Depends(get_store)) -> dict[str, Any]:
+    """One read-only plain-English turn: the model sees the ledger snapshot and may list pending
+    transactions, nothing else. Never parses commands (no /approve here), never writes a row,
+    never sends a Telegram message."""
+    _chat_http_authorised(authorization)
+    message = body.get("message")
+    if not isinstance(message, str) or not message.strip():
+        raise HTTPException(422, "message must be a non-empty string")
+    if not tg_llm_enabled():
+        raise HTTPException(503, "no chat model is configured")
+    history = _chat_http_history(body.get("history"))
+    context = await asyncio.to_thread(_ledger_snapshot, store)
+    reply = await run_chat_turn(store, message.strip()[:CHAT_HTTP_MAX_CHARS], history=history,
+                                context=context, specs=CHAT_HTTP_SPECS)
+    return {"ok": True, "reply": reply, "read_only": True}
 
 
 class ChatReply(NamedTuple):
