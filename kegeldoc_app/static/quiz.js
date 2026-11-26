@@ -20,10 +20,6 @@
 
   function quizForm() { return document.getElementById('quiz-form'); }
   function isQuizPath(path) { return /^\/onboarding\/\d+$/.test(path); }
-  function reducedMotion() {
-    return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  }
-
   // ---- Swap a fetched screen into the page ------------------------------------------------
   function show(html, url, push) {
     var doc = new DOMParser().parseFromString(html, 'text/html');
@@ -44,6 +40,9 @@
     else if (url !== location.pathname) history.replaceState({ kd: 1 }, '', url);
 
     function apply() {
+      // Marks a screen that arrived by swap: its heading settles in place instead of fading up
+      // from nothing (see "swapped screens" in kegeldoc.css).
+      nextMain.classList.add('kd-swapped');
       top.replaceWith(document.adoptNode(nextTop));
       main.replaceWith(document.adoptNode(nextMain));
       document.title = doc.title;
@@ -58,13 +57,12 @@
       if (title) { title.setAttribute('tabindex', '-1'); title.focus({ preventScroll: true }); }
       busy = false;
     }
-    if (document.startViewTransition && !reducedMotion()) {
-      var t = document.startViewTransition(apply);
-      t.updateCallbackDone.then(settle, settle);
-    } else {
-      apply();
-      settle();
-    }
+    // No page-wide cross-fade here. A view transition dissolved the old screen while the new
+    // one's entrance was still starting from transparent, and on phones that left a frame or
+    // two with an empty page: a one-off blink. The old question now stays until the new one
+    // replaces it in the same frame, and the new one's own entrance is the only animation.
+    apply();
+    settle();
   }
 
   // ---- Send an answer ---------------------------------------------------------------------

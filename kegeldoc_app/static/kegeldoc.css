@@ -677,3 +677,16 @@ html.no-vt:not(.is-ready) main { animation: none !important; opacity: 0; }
 
 /* The quiz script moves focus to each new question for screen readers; no ring for that. */
 .q-title:focus, .fact-title:focus { outline: none; }
+
+/* ---------- swapped quiz screens (static/quiz.js) ---------- */
+/* A screen swapped in place never starts from an empty page: the whole-screen fade is off, the
+   heading and any fact card settle from 30% opacity, and the answers rise in as before. */
+.kd-swapped .screen-in { animation: none; }
+.kd-swapped .q-title, .kd-swapped .q-help, .kd-swapped .fact { animation: settleIn .28s ease both; }
+@keyframes settleIn { from { opacity: .3; transform: translate3d(0, 4px, 0); } to { opacity: 1; transform: none; } }
+/* Each quiz screen is at least a phone screen tall, so what follows it (the rehearsal note on
+   phones) stays put below the fold instead of jumping as questions change height. */
+.quiz-body main { min-height: calc(100svh - 96px); }
+@media (prefers-reduced-motion: reduce) {
+  @keyframes settleIn { from { opacity: .3; } to { opacity: 1; } }
+}
