@@ -99,6 +99,9 @@ async def telegram_webhook(update: dict[str, Any] = Body(...), store: FinanceSto
 - **Implemented:** <what changed, file(s)>
 - **Verified:** <syntax check, systemd restart, API response, etc.>
 -->
+### 2026-11-27 — kegeldoc quiz blink fix DEPLOYED to `kegeldoc.fit`
+- **Git commit:** `0414377` pushed to `origin/main`, pulled fast-forward on the VPS; `kegeldoc-app` restarted, active, `/health` `"failures": 0`.
+- **Verified:** live quiz pages load `quiz.js?v=65ff5f8ac3` (marks `kd-swapped`, no `startViewTransition` call) and `kegeldoc.css?v=65ff5f8ac3` (`settleIn`, `.quiz-body main` min-height). Scripted full men's walk on kegeldoc.fit: charts, analysis, compatibility 96 Excellent, paywall with timer, checkout and rehearsal submit all 200.
 ### 2026-11-27 — kegeldoc: no blink between quiz questions on phones (local; not yet deployed)
 - **Git commit:** see the commit carrying this entry.
 - **Found (iPhone 17 Pro simulator, 60 fps frames of a swap):** the old question vanished, then about 6 frames (~0.1 s) showed an empty page — header only, and the phone-only rehearsal note at the page end disappeared too — before the new question faded in. The same-document view transition dissolved the old screen while the new screen's own entrance (`.screen-in` fade, options from opacity 0) was still starting from transparent; desktop paints fast enough to hide the gap. The rehearsal note also moved with every change in question height.
