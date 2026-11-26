@@ -1,10 +1,14 @@
 """Read-only views, one registry per agent. Each view returns `(state, summary)`.
 
-Phase 0 rule: a view may only *read*. Marketing views call the agent's own read paths
+Rule: a view may only *read*. Marketing views call the agent's own read paths
 (`MarketingSettings.describe`, `funnel_metrics.snapshot` / `by_ad`, which run the metrics export
 with `--offline` and never write the operator sheet). Finance views are HTTP `GET`s against the
-finance agent's existing `/health` and `/spend/envelope`. Nothing here approves, spends, pauses,
-publishes, renders, or changes a switch, and no view takes a file path from the client.
+finance agent's `/health` and `/spend/envelope`, plus one `POST /chat/ask`: a read-only chat turn
+whose only tool lists pending transactions (enforced in the finance agent, not here). Nothing here
+approves, spends, pauses, publishes, renders, or changes a switch, and no view takes a file path.
+
+An agent may name a `fallback` view: free text that is not a view name goes there whole
+(`message`), with earlier user/assistant turns as `history`.
 """
 
 from __future__ import annotations
@@ -17,7 +21,9 @@ from typing import Any
 
 import httpx
 
-from .config import GatewaySettings
+from .config import GatewaySettings, finance_chat_token
+
+CHAT_PATH = "/chat/ask"
 
 ViewResult = tuple[dict[str, Any], str]
 Handler = Callable[[dict[str, str]], Awaitable[ViewResult]]
@@ -46,6 +52,8 @@ class View:
     description: str
     params: tuple[str, ...]
     handler: Handler
+    #: Free text, not key=value params: the gateway passes `message` and `history`.
+    free_text: bool = False
 
 
 def _day(params: dict[str, str], key: str, default: str) -> str:
@@ -131,6 +139,35 @@ def finance_views(settings: GatewaySettings,
                       f"{'on' if data.get('dry_run') else 'OFF'}, chat model "
                       f"{'configured' if llm.get('configured') else 'not configured'}.")
 
+    async def chat(params: dict[str, Any]) -> ViewResult:
+        token = finance_chat_token()
+        if not token:
+            raise ViewError("finance chat is off: set AGUI_FINANCE_CHAT_TOKEN (and FINANCE_CHAT_TOKEN "
+                            "on the finance agent)")
+        body = {"message": str(params.get("message", ""))[:1500],
+                "history": list(params.get("history") or [])[-6:]}
+        try:
+            async with httpx.AsyncClient(base_url=settings.finance_url, transport=transport,
+                                         timeout=settings.chat_timeout,
+                                         follow_redirects=False) as client:
+                response = await client.post(CHAT_PATH, json=body,
+                                             headers={"Authorization": f"Bearer {token}"})
+        except httpx.HTTPError as exc:
+            raise ViewError(f"finance agent unreachable ({type(exc).__name__})") from None
+        if response.status_code in (401, 503):
+            raise ViewError(f"finance chat refused (HTTP {response.status_code}): check "
+                            "FINANCE_CHAT_TOKEN and the chat model on the finance agent")
+        if response.status_code != 200:
+            raise ViewError(f"finance agent answered HTTP {response.status_code} on {CHAT_PATH}")
+        try:
+            data = response.json()
+        except ValueError:
+            raise ViewError("finance agent sent non-JSON on chat") from None
+        reply = data.get("reply") if isinstance(data, dict) else None
+        if not isinstance(reply, str) or not reply.strip():
+            raise ViewError("finance agent sent an empty chat reply")
+        return {"read_only": bool(data.get("read_only", False))}, reply
+
     async def envelope(params: dict[str, str]) -> ViewResult:
         handle = params.get("agent_handle", settings.envelope_handles[0]).strip()
         if not _HANDLE.fullmatch(handle) or handle not in settings.envelope_handles:
@@ -145,7 +182,13 @@ def finance_views(settings: GatewaySettings,
         View("health", "finance agent up/down, dry-run, chat model configured", (), health),
         View("envelope", "remaining spend envelope for an allowed agent handle",
              ("agent_handle",), envelope),
+        View("chat", "plain-English question about the books (read-only; anything that is not "
+             "a view name)", (), chat, free_text=True),
     )}
+
+
+#: Which view receives free text, per agent.
+FALLBACK = {"finance": "chat"}
 
 
 def registry(settings: GatewaySettings,

@@ -1,4 +1,4 @@
-"""AG-UI endpoint for this project's agents. Phase 0: read-only.
+"""AG-UI endpoint for this project's agents. Read-only (phase 0 views + phase 1 finance chat).
 
     POST /agui/{agent}     body: AG-UI RunAgentInput; response: AG-UI event stream (SSE)
     GET  /healthz          liveness only, no data
@@ -7,7 +7,9 @@ Choosing a view, in order:
   1. `forwardedProps.view` (+ `forwardedProps.params`), for a dashboard button;
   2. the last user message: first word is the view, the rest `key=value` params,
      e.g. "attribution since=7daysago until=today";
-  3. otherwise the run answers with the list of views (still a successful run).
+  3. otherwise, if the agent has a fallback view (finance: `chat`), the whole message goes there,
+     with earlier user/assistant turns of `messages` as history;
+  4. otherwise the run answers with the list of views (still a successful run). `help` always does.
 
 Every run streams the same shape:
   RUN_STARTED -> STEP_STARTED(view) -> STATE_SNAPSHOT{agent, view, read_only, data}
@@ -77,6 +79,18 @@ def _last_user_text(run: RunAgentInput) -> str:
     return ""
 
 
+def chat_history(run: RunAgentInput) -> list[dict[str, str]]:
+    """Earlier user/assistant text turns, oldest first, excluding the current message."""
+    turns = []
+    for message in run.messages or []:
+        role, content = getattr(message, "role", ""), getattr(message, "content", "")
+        if role in ("user", "assistant") and isinstance(content, str) and content.strip():
+            turns.append({"role": role, "content": content[:1500]})
+    if turns and turns[-1]["role"] == "user":
+        turns.pop()
+    return turns[-6:]
+
+
 def choose_view(run: RunAgentInput) -> tuple[str, dict[str, str]]:
     props = run.forwarded_props if isinstance(run.forwarded_props, dict) else {}
     if props.get("view"):
@@ -124,6 +138,14 @@ def create_app(settings: GatewaySettings | None = None, *,
         agent_views = registry[agent]
         name, params = choose_view(run)
         view = agent_views.get(name)
+        fallback = agent_views.get(views_mod.FALLBACK.get(agent, ""))
+        if view is not None and view.free_text:
+            view = None  # free-text views are reached by fallback only, never by keyword
+        if view is None and fallback is not None and name not in ("", "help"):
+            text = _last_user_text(run).strip()
+            if text:
+                view, name = fallback, fallback.name
+                params = {"message": text, "history": chat_history(run)}
         if view is None:
             listing = "; ".join(f"{v.name}" + (f" ({', '.join(v.params)})" if v.params else "")
                                 + f": {v.description}" for v in agent_views.values())
@@ -135,7 +157,7 @@ def create_app(settings: GatewaySettings | None = None, *,
                                         f"Views for {agent}: {listing}.", ids):
                 yield chunk
             return
-        unknown = sorted(set(params) - set(view.params))
+        unknown = [] if view.free_text else sorted(set(params) - set(view.params))
         if unknown:
             yield encoder.encode(RunErrorEvent(type=EventType.RUN_ERROR, code="bad_params",
                                                message=f"unknown parameter(s): {', '.join(unknown)}"))

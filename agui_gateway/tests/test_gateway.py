@@ -37,11 +37,13 @@ def env(monkeypatch, tmp_path):
 class Finance:
     """A fake finance agent that records every request it sees."""
 
-    def __init__(self, health=None, status=200):
+    def __init__(self, health=None, status=200, chat_status=200, reply="Two transactions are pending."):
         self.requests: list[httpx.Request] = []
         self.health = health or {"ok": True, "db": True, "dry_run": True, "issuer_configured": False,
                                  "llm": {"configured": True, "providers": ["openrouter"]}}
         self.status = status
+        self.chat_status = chat_status
+        self.reply = reply
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -50,6 +52,9 @@ class Finance:
         if request.url.path == "/spend/envelope":
             return httpx.Response(200, json={"allowed": True, "reason": "", "remaining_minor": 4200,
                                              "agent_handle": request.url.params["agent_handle"]})
+        if request.method == "POST" and request.url.path == "/chat/ask":
+            return httpx.Response(self.chat_status,
+                                  json={"ok": True, "reply": self.reply, "read_only": True})
         return httpx.Response(404, json={"detail": "nope"})
 
 
@@ -129,11 +134,12 @@ def test_forwarded_props_select_the_view_for_a_dashboard_button():
     assert "unavailable" in evts[4]["delta"], "no funnel DB in this test"
 
 
-def test_no_view_answers_with_help_not_an_error():
-    evts = events(client().post("/agui/finance", json=run_body("hello"), headers=AUTH))
-    assert types(evts) == HAPPY
-    names = [v["name"] for v in evts[2]["snapshot"]["data"]["views"]]
-    assert names == ["health", "envelope"]
+def test_help_lists_views_and_is_not_an_error():
+    for agent, text in (("finance", "help"), ("finance", ""), ("marketing", "hello")):
+        evts = events(client().post(f"/agui/{agent}", json=run_body(text), headers=AUTH))
+        assert types(evts) == HAPPY and evts[2]["snapshot"]["view"] == "help", (agent, text)
+    evts = events(client().post("/agui/finance", json=run_body("help"), headers=AUTH))
+    assert [v["name"] for v in evts[2]["snapshot"]["data"]["views"]] == ["health", "envelope", "chat"]
 
 
 def test_bad_params_end_in_run_error():
@@ -168,7 +174,7 @@ def test_client_tools_and_state_are_ignored():
     assert evts[2]["snapshot"]["data"]["dry_run"] is True, "client state is not an authority"
 
 
-def test_finance_is_read_with_get_only():
+def test_finance_views_are_read_with_get_only():
     finance = Finance()
     c = client(finance)
     events(c.post("/agui/finance", json=run_body("health"), headers=AUTH))
@@ -208,10 +214,77 @@ def test_redact_is_recursive():
 
 
 def test_gateway_source_has_no_write_paths():
-    """Outbound calls are GET only, and no approval, spend-gate or switch name appears at all."""
+    """Outbound calls are GET, except one POST to the read-only chat path; no approval,
+    spend-gate or switch name appears at all."""
     import re
     src = "".join(p.read_text() for p in (REPO / "agui_gateway").glob("*.py"))
-    assert not re.search(r"\b(client|httpx)\.(post|put|patch|delete|request|stream)\(", src)
+    calls = re.findall(r"\b(?:client|httpx)\.(post|put|patch|delete|request|stream)\(([^,)]*)", src)
+    assert calls == [("post", "CHAT_PATH")], calls
+    assert 'CHAT_PATH = "/chat/ask"' in src
     for needle in ("/approvals", "/spend/gate", "SUPERVISOR_ENABLED", "FUNNEL_CHARGES_ENABLED",
                    "engine.dry_run"):
         assert needle not in src, needle
+
+
+# ---- finance chat (read-only, via the finance agent's POST /chat/ask) -------
+
+CHAT_TOKEN = "test-finance-chat-token"
+
+
+def conversation(*turns):
+    return [{"id": f"m{i}", "role": role, "content": text} for i, (role, text) in enumerate(turns)]
+
+
+def test_free_text_goes_to_finance_chat_with_history(monkeypatch):
+    monkeypatch.setenv("AGUI_FINANCE_CHAT_TOKEN", CHAT_TOKEN)
+    finance = Finance(reply="Two transactions are pending: Ahrefs and Upwork.")
+    body = run_body(messages=conversation(("user", "what's my net?"), ("assistant", "$4,210."),
+                                          ("user", "and what is waiting for me?")))
+    evts = events(client(finance).post("/agui/finance", json=body, headers=AUTH))
+    assert types(evts) == HAPPY
+    assert evts[2]["snapshot"] == {"agent": "finance", "view": "chat", "read_only": True,
+                                   "data": {"read_only": True}}
+    assert evts[4]["delta"] == "Two transactions are pending: Ahrefs and Upwork."
+    (request,) = finance.requests
+    assert (request.method, request.url.path) == ("POST", "/chat/ask")
+    assert request.headers["authorization"] == f"Bearer {CHAT_TOKEN}"
+    sent = json.loads(request.content)
+    assert sent["message"] == "and what is waiting for me?"
+    assert sent["history"] == [{"role": "user", "content": "what's my net?"},
+                               {"role": "assistant", "content": "$4,210."}]
+
+
+def test_chat_is_off_without_its_token():
+    finance = Finance()
+    evts = events(client(finance).post("/agui/finance", json=run_body("how are the books?"),
+                                       headers=AUTH))
+    assert types(evts) == ["RUN_STARTED", "RUN_ERROR"] and "AGUI_FINANCE_CHAT_TOKEN" in evts[1]["message"]
+    assert finance.requests == []
+
+
+@pytest.mark.parametrize("status", [401, 503])
+def test_chat_refused_by_finance_is_a_run_error(monkeypatch, status):
+    monkeypatch.setenv("AGUI_FINANCE_CHAT_TOKEN", CHAT_TOKEN)
+    evts = events(client(Finance(chat_status=status)).post(
+        "/agui/finance", json=run_body("how are the books?"), headers=AUTH))
+    assert types(evts) == ["RUN_STARTED", "RUN_ERROR"] and f"HTTP {status}" in evts[1]["message"]
+
+
+def test_chat_cannot_be_reached_by_keyword_or_forwarded_props(monkeypatch):
+    """`chat` is free text only; a crafted view name or params cannot smuggle a message shape."""
+    monkeypatch.setenv("AGUI_FINANCE_CHAT_TOKEN", CHAT_TOKEN)
+    finance = Finance()
+    body = run_body(forwardedProps={"view": "chat", "params": {"message": "x"}})
+    evts = events(client(finance).post("/agui/finance", json=body, headers=AUTH))
+    assert evts[2]["snapshot"]["view"] == "help" and finance.requests == []
+
+
+def test_chat_token_never_reaches_the_stream(monkeypatch):
+    monkeypatch.setenv("AGUI_FINANCE_CHAT_TOKEN", CHAT_TOKEN)
+    text = client().post("/agui/finance", json=run_body("hi there"), headers=AUTH).text
+    assert CHAT_TOKEN not in text and TOKEN not in text
+
+
+def test_marketing_has_no_chat_fallback():
+    evts = events(client().post("/agui/marketing", json=run_body("tell me a secret"), headers=AUTH))
+    assert evts[2]["snapshot"]["view"] == "help"

@@ -4,8 +4,8 @@ One [AG-UI](https://github.com/ag-ui-protocol/ag-ui) endpoint in front of this p
 browser dashboard (or any AG-UI client) can talk to them over one protocol. The agents themselves are
 unchanged: the gateway adapts what each one already exposes into AG-UI runs and events.
 
-**Phase 0 (this change) is read-only.** Nothing that arrives through the gateway can approve, spend,
-pause, publish, render, or change a switch.
+**Read-only (phase 0 views + phase 1 finance chat).** Nothing that arrives through the gateway can
+approve, spend, pause, publish, render, or change a switch.
 
 ## 1. Where it sits
 
@@ -15,7 +15,8 @@ pause, publish, render, or change a switch.
         ▼  text/event-stream of AG-UI events
  agui_gateway  (FastAPI, 127.0.0.1:8095, ag-ui-protocol==1.0.0)
         ├─ marketing → marketing_agent read paths (in-process; metrics export runs --offline)
-        └─ finance   → GET /health, GET /spend/envelope on the finance agent (AGUI_FINANCE_URL)
+        └─ finance   → GET /health, GET /spend/envelope, POST /chat/ask (read-only chat) on the
+                       finance agent (AGUI_FINANCE_URL)
  Telegram bot / supervisor: unchanged, still the only place a human approves.
 ```
 
@@ -24,8 +25,10 @@ pause, publish, render, or change a switch.
 * **Request:** AG-UI `RunAgentInput` (`threadId`, `runId`, `messages`, `state`, `tools`, `context`,
   `forwardedProps`, `resume`).
 * **View selection:** `forwardedProps.view` + `forwardedProps.params` (for dashboard buttons), else the
-  last user message: `"<view> key=value ..."`, e.g. `attribution since=7daysago until=today`. No
-  view, or an unknown one, returns the list of views as a normal run.
+  last user message: `"<view> key=value ..."`, e.g. `attribution since=7daysago until=today`. On
+  `finance`, any other text is a chat turn (earlier user/assistant turns in `messages` go along as
+  history, last 6). `help`, an empty message, or unknown text on `marketing` returns the list of
+  views as a normal run.
 * **Every successful run:** `RUN_STARTED` → `STEP_STARTED(view)` →
   `STATE_SNAPSHOT{agent, view, read_only: true, data}` → `TEXT_MESSAGE_START/CONTENT/END` (a one-line
   summary) → `STEP_FINISHED` → `RUN_FINISHED`.
@@ -42,6 +45,16 @@ pause, publish, render, or change a switch.
 | `marketing` | `attribution` | `since` (`7daysago`), `until` (`today`) | `funnel_metrics.by_ad` → export `--by-ad` (read-only) |
 | `finance` | `health` | none | `GET /health` |
 | `finance` | `envelope` | `agent_handle` (must be in `AGUI_ENVELOPE_HANDLES`) | `GET /spend/envelope?ask_issuer=false` |
+| `finance` | `chat` | free text (not reachable by keyword) | `POST /chat/ask` with `AGUI_FINANCE_CHAT_TOKEN`; the reply streams as the text message |
+
+**Finance chat is read-only at the finance agent, not just at the gateway.** `POST /chat/ask`
+(`backend/finance_agent.py`) needs `Authorization: Bearer $FINANCE_CHAT_TOKEN` (unset → 503, wrong →
+401), never parses commands (`/approve …` is just text to the model), drops client `system`/`tool`
+history turns, and runs `run_chat_turn` with `CHAT_HTTP_SPECS = (get_pending_transactions,)`. Since
+this change `run_chat_turn` also *enforces* its `specs`: a model naming a tool it was not handed
+(e.g. `approve_transaction`) gets a refusal as the tool result and nothing executes. Before, `specs`
+only limited what was advertised, and `run_tool` would have run any registered tool, the Telegram
+chat path included.
 
 Dates take `YYYY-MM-DD`, `today`, `yesterday` or `Ndaysago`. No view accepts a file path.
 
@@ -52,8 +65,9 @@ Dates take `YYYY-MM-DD`, `today`, `yesterday` or `Ndaysago`. No view accepts a f
   is open and returns only `{"ok", "phase", "read_only"}`. FastAPI's docs/OpenAPI routes are off.
 * **Loopback by default** (`AGUI_GATEWAY_HOST=127.0.0.1`). Before any public hostname, put
   Cloudflare Access in front on the tunnel; a bearer token alone is not enough for a browser app.
-* **Read-only by construction:** two routes only; outbound HTTP is `GET` only, redirects not followed,
-  `ask_issuer=false`; no approval, spend-gate or switch name appears in the package (tested).
+* **Read-only by construction:** two routes only; outbound HTTP is `GET`, except one `POST` to the
+  read-only `/chat/ask`; redirects not followed; `ask_issuer=false`; no approval, spend-gate or
+  switch name appears in the package (tested).
 * **The browser is not an authority:** client `tools` and `state` are ignored, and `resume` is
   refused with `read_only`, so there is no way to answer an approval through this door yet.
 * **No secrets in the stream:** state is built from payloads that carry none, and `redact()` also
@@ -79,14 +93,15 @@ uv run --no-project --with ag-ui-protocol==1.0.0 --with fastapi --with httpx --w
 ```
 
 Env: `AGUI_GATEWAY_TOKEN`, `AGUI_GATEWAY_HOST`, `AGUI_GATEWAY_PORT` (8095), `AGUI_FINANCE_URL`
-(`http://127.0.0.1:8000`), `AGUI_ENVELOPE_HANDLES` (`worker:funnel`), `AGUI_HTTP_TIMEOUT` (10), plus
-the marketing agent's own `MARKETING_*` and the funnel's `FUNNEL_*` paths.
+(`http://127.0.0.1:8000`), `AGUI_ENVELOPE_HANDLES` (`worker:funnel`), `AGUI_HTTP_TIMEOUT` (10), `AGUI_CHAT_TIMEOUT` (60),
+`AGUI_FINANCE_CHAT_TOKEN` (must equal the finance agent's `FINANCE_CHAT_TOKEN`; unset = chat off),
+plus the marketing agent's own `MARKETING_*` and the funnel's `FUNNEL_*` paths.
 
 ## 6. Next phases (each a separate, reviewed change)
 
-1. **Finance chat.** The finance agent's plain-English chat (`run_chat_turn`, read-only tools by
-   default) only runs inside the Telegram webhook today. Exposing it needs a new read-only finance
-   endpoint; the gateway would stream the reply as `TEXT_MESSAGE_*`.
+1. **Finance chat: done.** `POST /chat/ask` on the finance agent + the gateway's `chat` fallback.
+   The reply arrives whole (the finance chat loop returns one string), so it streams as a single
+   `TEXT_MESSAGE_CONTENT`, not token by token.
 2. **Dashboard.** Next.js using `@ag-ui/client` `HttpAgent` (or CopilotKit) against this gateway,
    behind Cloudflare Access. Server-side token, never shipped to the browser.
 3. **Approvals as interrupts.** A pending tier-2 spend ends a run with an interrupt outcome; the
@@ -101,6 +116,8 @@ Not planned: anything that arms spend, publishing, pausing or rendering.
 
 * Exercised with the Python SDK's own encoder, FastAPI's test client and curl. Not yet with
   `@ag-ui/client` or CopilotKit.
-* The finance views were tested against a mock; the live finance agent was not running during the
-  smoke test (its view correctly ended in `RUN_ERROR` "unreachable").
+* Finance views and chat are tested against a mock, and end to end in-process (gateway → the real
+  `/chat/ask` route via `httpx.ASGITransport` → a scripted model; the model's attempt to approve was
+  refused). Not against the deployed finance agent, its database or a real model.
+* The deployed finance agent needs `FINANCE_CHAT_TOKEN` set (and a restart) before chat works there.
 * No systemd unit or tunnel hostname yet.
