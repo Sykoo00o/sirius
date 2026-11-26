@@ -105,7 +105,8 @@ def _asset_version(*names: str) -> str:
     return digest.hexdigest()[:10]
 
 
-templates.env.globals["asset_v"] = _asset_version("kegeldoc.css", "app.css")
+templates.env.globals["asset_v"] = _asset_version("kegeldoc.css", "app.css", "logo-horizontal.svg",
+                                                  "favicon.svg", "favicon-32.png", "apple-touch-icon.png")
 store = ResponseStore(settings.database_abspath)
 billing_store = BillingStore(settings.billing_database_abspath)
 #: Funnel telemetry lives in the *billing* database file, beside the subscription rows rather

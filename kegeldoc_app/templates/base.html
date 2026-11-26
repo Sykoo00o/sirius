@@ -17,8 +17,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{% block title %}{{ brand }}{% endblock %}</title>
 <meta name="description" content="{{ copy.hero_sub | striptags | truncate(155, true) }}">
-<meta name="theme-color" content="#ffffff">
-<link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+<meta name="theme-color" content="#FF6B2C">
+<link rel="icon" href="/static/favicon.svg?v={{ asset_v }}" type="image/svg+xml">
+<link rel="icon" href="/static/favicon-32.png?v={{ asset_v }}" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v={{ asset_v }}">
+<link rel="manifest" href="/static/site.webmanifest">
 <script>document.documentElement.classList.add('js');</script>
 <link rel="stylesheet" href="/static/kegeldoc.css?v={{ asset_v }}">
 {% block extra_styles %}
@@ -31,9 +34,9 @@
     theme: {
       extend: {
         colors: {
-          paper: '#ffffff', cream: '#f2f8f7', line: '#dde7e5', ink: '#1d2b36', muted: '#56626b',
-          ember: { DEFAULT: '#0b6f78', dark: '#0a5e66', soft: '#e7f3f1' },
-          moss:  { DEFAULT: '#157a5a', soft: '#eaf5f0' },
+          paper: '#ffffff', cream: '#FFF4EC', line: '#F1E2D8', ink: '#2B1145', muted: '#6B5A78',
+          ember: { DEFAULT: '#C2410C', dark: '#9A3412', soft: '#FFEEE4' },
+          moss:  { DEFAULT: '#0E7A57', soft: '#E3F6EE' },
         },
         maxWidth: { copy: '42rem' },
       }
@@ -62,7 +65,7 @@
 {% block header %}
 <header data-section="header" class="site-header">
   <div class="inner">
-    <a class="logo" href="/" aria-label="{{ brand }} home"><img class="logo-mark" src="/static/logo.svg" alt="" width="34" height="34"><span class="logo-word"><span>kegel<b>doc</b></span><small>sexual health</small></span></a>
+    <a class="logo" href="/" aria-label="{{ brand }} home"><img class="logo-lockup" src="/static/logo-horizontal.svg?v={{ asset_v }}" alt="" width="126" height="38"></a>
     {% block header_aside %}<a class="btn-dark" href="/onboarding">Get started</a>{% endblock %}
   </div>
 </header>
@@ -73,7 +76,7 @@
 {% block footer %}
 <footer data-section="footer" class="site-footer">
   <div class="row">
-    <a class="logo" href="/"><img class="logo-mark" src="/static/logo.svg" alt="" width="34" height="34"><span class="logo-word"><span>kegel<b>doc</b></span><small>sexual health</small></span></a>
+    <a class="logo" href="/"><img class="logo-lockup" src="/static/logo-horizontal.svg?v={{ asset_v }}" alt="kegeldoc" width="126" height="38"></a>
     <nav class="links" aria-label="Policies">
       <a href="/policy/terms">Terms</a>
       <a href="/policy/privacy">Privacy</a>

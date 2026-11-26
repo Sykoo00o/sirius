@@ -15,7 +15,7 @@
     <span class="eyebrow">Your result</span>
     <h1 class="fact-title">Your compatibility score with a kegel plan</h1>
     <div class="compat-ring" style="--pct:{{ score.pct }}">
-      <svg viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="52" fill="none" stroke="#e7f3f1" stroke-width="12"/><circle class="arc" cx="60" cy="60" r="52" fill="none" stroke="url(#cg)" stroke-width="12" stroke-linecap="round" pathLength="100" stroke-dasharray="{{ score.pct }} 100"/><defs><linearGradient id="cg" x1="0" x2="1"><stop offset="0" stop-color="#0b6f78"/><stop offset="1" stop-color="#157a5a"/></linearGradient></defs></svg>
+      <svg viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="52" fill="none" stroke="#FFEEE4" stroke-width="12"/><circle class="arc" cx="60" cy="60" r="52" fill="none" stroke="url(#cg)" stroke-width="12" stroke-linecap="round" pathLength="100" stroke-dasharray="{{ score.pct }} 100"/><defs><linearGradient id="cg" x1="0" x2="1"><stop offset="0" stop-color="#FF6B2C"/><stop offset="1" stop-color="#FF3D7F"/></linearGradient></defs></svg>
       <div class="label"><span class="compat-pct" data-to="{{ score.pct }}">{{ score.pct }}%</span><b>{{ score.level }}</b><small>compatibility</small></div>
     </div>
     <p class="compat-note">{{ score.note }}</p>
